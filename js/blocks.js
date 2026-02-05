@@ -60,9 +60,13 @@ const BlockRegistry = (() => {
           if (!gen) throw new Error(`Unknown generator: ${config.generator}`);
           result = gen(config.generatorConfig);
         } else if (config.source === 'csv' && config.csvData) {
+          // Handle both raw CSV text and pre-parsed objects
+          const parsed = typeof config.csvData === 'string'
+            ? DataIO.parseCSV(config.csvData)
+            : config.csvData;
           const values = config.csvColumn
-            ? DataIO.columnToArray(config.csvData, config.csvColumn)
-            : Object.values(config.csvData.columns)[0].map(Number);
+            ? DataIO.columnToArray(parsed, config.csvColumn)
+            : Object.values(parsed.columns)[0].map(Number);
           result = {
             values: values.filter(v => !isNaN(v)),
             sampleRate: config.sampleRate,
