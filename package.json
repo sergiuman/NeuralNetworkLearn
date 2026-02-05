@@ -1,0 +1,12 @@
+{
+  "name": "signalflow",
+  "version": "1.0.0",
+  "description": "Visual signal processing pipeline builder",
+  "scripts": {
+    "start": "npx serve -l 8080 .",
+    "test": "node test.js"
+  },
+  "devDependencies": {
+    "serve": "^14.2.0"
+  }
+}
