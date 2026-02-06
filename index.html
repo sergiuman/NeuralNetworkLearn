@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SignalFlow - Signal Processing Studio</title>
+  <link rel="stylesheet" href="css/app.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- SheetJS for Excel support -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="app-layout">
+
+    <!-- ─── Toolbar ──────────────────────────────────────────────────── -->
+    <header class="app-toolbar">
+      <div class="app-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M2 12 L6 8 L10 16 L14 6 L18 14 L22 10" stroke="#4FC3F7"/>
+          <circle cx="6" cy="8" r="1.5" fill="#4FC3F7"/>
+          <circle cx="10" cy="16" r="1.5" fill="#4FC3F7"/>
+          <circle cx="14" cy="6" r="1.5" fill="#4FC3F7"/>
+          <circle cx="18" cy="14" r="1.5" fill="#4FC3F7"/>
+        </svg>
+        <span>SignalFlow</span>
+      </div>
+
+      <div class="toolbar-group">
+        <button id="btn-run" class="btn btn-primary" title="Run pipeline (Ctrl+Enter)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          Run
+        </button>
+        <button id="btn-clear" class="btn btn-danger" title="Clear pipeline">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M5 6v14a2 2 0 002 2h10a2 2 0 002-2V6"/></svg>
+          Clear
+        </button>
+      </div>
+
+      <div class="toolbar-separator"></div>
+
+      <div class="toolbar-group">
+        <span class="toolbar-label">Templates:</span>
+        <button id="btn-template-fft" class="btn" title="FFT Analysis template">FFT Analysis</button>
+        <button id="btn-template-classify" class="btn" title="Signal Classification template">Classification</button>
+        <button id="btn-template-stock" class="btn" title="Stock Analysis template">Stock Analysis</button>
+      </div>
+
+      <div class="toolbar-separator"></div>
+
+      <div class="toolbar-group">
+        <button id="btn-save" class="btn" title="Save pipeline to file">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+          Save
+        </button>
+        <button id="btn-load" class="btn" title="Load pipeline from file">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Load
+        </button>
+        <button id="btn-export" class="btn" title="Export results as CSV">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8M8 9h2"/></svg>
+          Export CSV
+        </button>
+      </div>
+    </header>
+
+    <!-- ─── Body ─────────────────────────────────────────────────────── -->
+    <div class="app-body">
+
+      <!-- Sidebar: Block Palette -->
+      <aside class="sidebar">
+        <div class="sidebar-header">Processing Blocks</div>
+        <div id="sidebar-blocks"></div>
+      </aside>
+
+      <!-- Main Area -->
+      <div class="pipeline-area">
+        <!-- Pipeline Canvas -->
+        <div id="pipeline-canvas" class="pipeline-canvas">
+          <!-- Welcome Overlay -->
+          <div id="welcome-overlay" class="welcome-overlay">
+            <div class="welcome-content">
+              <h2>SignalFlow Studio</h2>
+              <p>
+                Build signal processing pipelines visually. Drag blocks from the sidebar,
+                connect them together, configure parameters, and run your analysis.
+                Works with any time-domain signal: biomedical, financial, industrial, and more.
+              </p>
+              <div class="welcome-templates">
+                <div class="template-card" onclick="App.loadTemplate('fft-analysis')">
+                  <span class="template-icon">📊</span>
+                  <div class="template-name">FFT Analysis</div>
+                  <div class="template-desc">Frequency spectrum analysis of a composite signal</div>
+                </div>
+                <div class="template-card" onclick="App.loadTemplate('signal-classification')">
+                  <span class="template-icon">🧠</span>
+                  <div class="template-name">Signal Classification</div>
+                  <div class="template-desc">ECG signal windowing, feature extraction, NN & fuzzy classifier</div>
+                </div>
+                <div class="template-card" onclick="App.loadTemplate('stock-analysis')">
+                  <span class="template-icon">📈</span>
+                  <div class="template-name">Stock Analysis</div>
+                  <div class="template-desc">Financial time-series with statistical features and trading signals</div>
+                </div>
+              </div>
+              <button class="welcome-start-empty" onclick="document.getElementById('welcome-overlay').style.display='none'">
+                or start with an empty canvas
+              </button>
+              <div class="welcome-hint">Drag blocks from the left sidebar onto the canvas to build your pipeline</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Output Panel -->
+        <div id="output-panel" class="output-panel">
+          <div class="output-header" id="btn-toggle-output">
+            <h3>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
+              Output &amp; Visualization
+            </h3>
+            <span class="toggle-icon">▾</span>
+          </div>
+          <div id="output-content" class="output-content"></div>
+        </div>
+      </div>
+
+      <!-- Config Panel -->
+      <aside id="config-panel" class="config-panel">
+        <div class="config-header">
+          <h3 id="config-title">Block Settings</h3>
+          <button id="config-close" class="config-close">&times;</button>
+        </div>
+        <div id="config-content" class="config-body"></div>
+      </aside>
+
+    </div>
+  </div>
+
+  <!-- Notifications -->
+  <div id="notifications" class="notifications"></div>
+
+  <!-- Scripts (order matters: dependencies first) -->
+  <script src="js/dsp.js"></script>
+  <script src="js/nn.js"></script>
+  <script src="js/fuzzy.js"></script>
+  <script src="js/data.js"></script>
+  <script src="js/blocks.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/pipeline.js"></script>
+  <script src="js/main.js"></script>
+
+  <!-- Keyboard shortcut: Ctrl+Enter to run -->
+  <script>
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        App.runPipeline();
+      }
+    });
+  </script>
+</body>
+</html>
