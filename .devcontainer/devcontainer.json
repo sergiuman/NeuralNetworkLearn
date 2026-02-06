@@ -1,9 +1,8 @@
 {
   "name": "SignalFlow",
-  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
   "forwardPorts": [8080],
   "postCreateCommand": "npm install",
-  "postStartCommand": "npm start",
   "portsAttributes": {
     "8080": {
       "label": "SignalFlow App",
