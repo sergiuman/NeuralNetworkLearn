@@ -230,6 +230,86 @@ const DSP = (() => {
     return features;
   }
 
+  // ─── EMG-Specific Features ───────────────────────────────────────────────
+
+  function meanAbsoluteValue(data) {
+    return data.reduce((s, v) => s + Math.abs(v), 0) / data.length;
+  }
+
+  function waveformLength(data) {
+    let wl = 0;
+    for (let i = 1; i < data.length; i++) {
+      wl += Math.abs(data[i] - data[i - 1]);
+    }
+    return wl;
+  }
+
+  function slopeSignChanges(data) {
+    let count = 0;
+    for (let i = 2; i < data.length; i++) {
+      const prev = data[i - 1] - data[i - 2];
+      const curr = data[i] - data[i - 1];
+      if ((prev > 0 && curr < 0) || (prev < 0 && curr > 0)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  function willsonAmplitude(data, threshold) {
+    threshold = threshold || 0.01;
+    let count = 0;
+    for (let i = 1; i < data.length; i++) {
+      if (Math.abs(data[i] - data[i - 1]) > threshold) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  function medianFrequency(data, sampleRate) {
+    const fftResult = fft(data, new Array(data.length).fill(0));
+    const halfLen = Math.floor(fftResult.real.length / 2);
+    const ps = powerSpectrum(fftResult.real, fftResult.imag).slice(0, halfLen);
+    const totalPower = ps.reduce((s, v) => s + v, 0);
+    let cumPower = 0;
+    const freqStep = sampleRate / fftResult.real.length;
+    for (let i = 0; i < ps.length; i++) {
+      cumPower += ps[i];
+      if (cumPower >= totalPower / 2) {
+        return i * freqStep;
+      }
+    }
+    return 0;
+  }
+
+  function meanFrequency(data, sampleRate) {
+    const fftResult = fft(data, new Array(data.length).fill(0));
+    const halfLen = Math.floor(fftResult.real.length / 2);
+    const ps = powerSpectrum(fftResult.real, fftResult.imag).slice(0, halfLen);
+    const freqStep = sampleRate / fftResult.real.length;
+    let num = 0, den = 0;
+    for (let i = 0; i < ps.length; i++) {
+      num += i * freqStep * ps[i];
+      den += ps[i];
+    }
+    return den === 0 ? 0 : num / den;
+  }
+
+  function extractEMGFeatures(segment, sampleRate) {
+    return {
+      mav: meanAbsoluteValue(segment),
+      rms: rms(segment),
+      wl: waveformLength(segment),
+      zc: zeroCrossings(segment),
+      ssc: slopeSignChanges(segment),
+      var: variance(segment),
+      wa: willsonAmplitude(segment),
+      mdf: medianFrequency(segment, sampleRate || 1000),
+      mnf: meanFrequency(segment, sampleRate || 1000)
+    };
+  }
+
   // ─── Autocorrelation ──────────────────────────────────────────────────────
 
   function autocorrelation(data, maxLag) {
@@ -292,6 +372,8 @@ const DSP = (() => {
     rms, mean, variance, stddev, peak, crestFactor, zeroCrossings, energy,
     segmentSignal,
     extractFFTCoefficients, extractFeatures,
+    meanAbsoluteValue, waveformLength, slopeSignChanges, willsonAmplitude,
+    medianFrequency, meanFrequency, extractEMGFeatures,
     autocorrelation,
     movingAverage, highPassFilter,
     normalize, standardize,

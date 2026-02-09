@@ -41,6 +41,8 @@ const BlockRegistry = (() => {
           { value: 'ecg', label: 'ECG (Heart Signal)' },
           { value: 'eeg', label: 'EEG (Brain Signal)' },
           { value: 'vibration', label: 'Mechanical Vibration' },
+          { value: 'emg', label: 'EMG (Hand Muscle)' },
+          { value: 'audioSignal', label: 'Audio Signal' },
           { value: 'randomWalk', label: 'Random Walk' }
         ]},
         { key: 'generatorConfig.samples', label: 'Number of Samples', type: 'number', min: 8, max: 8192, step: 1, showIf: { source: 'generate' } },
