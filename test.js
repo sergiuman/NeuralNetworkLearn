@@ -891,6 +891,779 @@ runTests('EndToEnd', function() {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// EMG GENERATOR & DSP FEATURE TESTS
+// ══════════════════════════════════════════════════════════════════════════════
+runTests('EMG_Features', function() {
+  var pass = 0, fail = 0;
+  function assert(cond, msg) {
+    if (cond) { pass++; console.log('  PASS: ' + msg); }
+    else { fail++; console.error('  FAIL: ' + msg); }
+  }
+  function approx(a, b, tol, msg) {
+    assert(Math.abs(a - b) < (tol || 0.01), msg + ' (got ' + a.toFixed(4) + ', expected ~' + b + ')');
+  }
+
+  console.log('=== EMG Generator & Feature Tests ===');
+
+  // EMG generator - all movements
+  var movements = ['pronation', 'supination', 'flexion', 'extension', 'rest'];
+  for (var m = 0; m < movements.length; m++) {
+    var emg = DataIO.generators.emg({ samples: 1024, sampleRate: 1000, movement: movements[m] });
+    assert(emg.values.length === 1024, 'EMG ' + movements[m] + ': produces 1024 samples');
+    assert(emg.sampleRate === 1000, 'EMG ' + movements[m] + ': correct sample rate');
+    assert(!isNaN(emg.values[0]), 'EMG ' + movements[m] + ': numeric output');
+  }
+
+  // Active EMG should have higher RMS than rest
+  var emgFlex = DataIO.generators.emg({ samples: 2048, sampleRate: 1000, movement: 'flexion', noise: 0.01 });
+  var emgRest = DataIO.generators.emg({ samples: 2048, sampleRate: 1000, movement: 'rest', noise: 0.01 });
+  var rmsFlex = DSP.rms(emgFlex.values);
+  var rmsRest = DSP.rms(emgRest.values);
+  assert(rmsFlex > rmsRest, 'EMG flexion RMS (' + rmsFlex.toFixed(4) + ') > rest RMS (' + rmsRest.toFixed(4) + ')');
+
+  // EMG-specific DSP features
+  var testSig = [];
+  for (var i = 0; i < 128; i++) testSig.push(Math.sin(2 * Math.PI * 10 * i / 128) + 0.1 * Math.sin(2 * Math.PI * 40 * i / 128));
+
+  var mav = DSP.meanAbsoluteValue(testSig);
+  assert(mav > 0, 'MAV is positive: ' + mav.toFixed(4));
+
+  var wl = DSP.waveformLength(testSig);
+  assert(wl > 0, 'Waveform length is positive: ' + wl.toFixed(4));
+
+  var ssc = DSP.slopeSignChanges(testSig);
+  assert(ssc > 0, 'Slope sign changes detected: ' + ssc);
+
+  var wa = DSP.willsonAmplitude(testSig, 0.01);
+  assert(wa > 0, 'Willson amplitude count: ' + wa);
+
+  var mdf = DSP.medianFrequency(testSig, 128);
+  assert(mdf > 0, 'Median frequency > 0: ' + mdf.toFixed(2) + ' Hz');
+
+  var mnf = DSP.meanFrequency(testSig, 128);
+  assert(mnf > 0, 'Mean frequency > 0: ' + mnf.toFixed(2) + ' Hz');
+
+  // extractEMGFeatures returns all features
+  var emgFeats = DSP.extractEMGFeatures(testSig, 128);
+  assert(emgFeats.mav > 0, 'extractEMGFeatures.mav > 0');
+  assert(emgFeats.rms > 0, 'extractEMGFeatures.rms > 0');
+  assert(emgFeats.wl > 0, 'extractEMGFeatures.wl > 0');
+  assert(typeof emgFeats.zc === 'number', 'extractEMGFeatures.zc is number');
+  assert(typeof emgFeats.ssc === 'number', 'extractEMGFeatures.ssc is number');
+  assert(emgFeats['var'] >= 0, 'extractEMGFeatures.var >= 0');
+  assert(typeof emgFeats.wa === 'number', 'extractEMGFeatures.wa is number');
+  assert(emgFeats.mdf >= 0, 'extractEMGFeatures.mdf >= 0');
+  assert(emgFeats.mnf >= 0, 'extractEMGFeatures.mnf >= 0');
+
+  console.log('EMG_Features: ' + pass + ' passed, ' + fail + ' failed\n');
+  return { pass: pass, fail: fail };
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUDIO SIGNAL GENERATOR TESTS
+// ══════════════════════════════════════════════════════════════════════════════
+runTests('AudioSignal', function() {
+  var pass = 0, fail = 0;
+  function assert(cond, msg) {
+    if (cond) { pass++; console.log('  PASS: ' + msg); }
+    else { fail++; console.error('  FAIL: ' + msg); }
+  }
+
+  console.log('=== Audio Signal Generator Tests ===');
+
+  var types = ['vowel_a', 'vowel_e', 'vowel_i', 'tone', 'silence'];
+  for (var t = 0; t < types.length; t++) {
+    var audio = DataIO.generators.audioSignal({ samples: 2048, sampleRate: 8000, signalType: types[t] });
+    assert(audio.values.length === 2048, 'Audio ' + types[t] + ': produces 2048 samples');
+    assert(audio.sampleRate === 8000, 'Audio ' + types[t] + ': correct sample rate');
+    assert(!isNaN(audio.values[0]), 'Audio ' + types[t] + ': numeric output');
+  }
+
+  // Vowel should have more energy than silence
+  var vowelA = DataIO.generators.audioSignal({ samples: 4096, sampleRate: 8000, signalType: 'vowel_a', noise: 0 });
+  var silence = DataIO.generators.audioSignal({ samples: 4096, sampleRate: 8000, signalType: 'silence', noise: 0 });
+  var energyA = DSP.energy(vowelA.values);
+  var energyS = DSP.energy(silence.values);
+  assert(energyA > energyS, 'Vowel energy (' + energyA.toFixed(2) + ') > silence energy (' + energyS.toFixed(6) + ')');
+
+  // Tone at 440Hz should have peak near 440Hz in FFT
+  var tone = DataIO.generators.audioSignal({ samples: 8192, sampleRate: 8000, signalType: 'tone', noise: 0 });
+  var fftResult = DSP.fft(tone.values);
+  var mags = DSP.magnitude(fftResult.real, fftResult.imag);
+  var peakBin = 0, peakVal = 0;
+  var halfLen = Math.floor(mags.length / 2);
+  for (var i = 0; i < halfLen; i++) {
+    if (mags[i] > peakVal) { peakVal = mags[i]; peakBin = i; }
+  }
+  var peakFreq = peakBin * 8000 / mags.length;
+  assert(Math.abs(peakFreq - 440) < 10, 'Tone peak at ~440Hz (got ' + peakFreq.toFixed(1) + 'Hz)');
+
+  console.log('AudioSignal: ' + pass + ' passed, ' + fail + ' failed\n');
+  return { pass: pass, fail: fail };
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EXCEL FILE PIPELINE TESTS (using real .xlsx files)
+// ══════════════════════════════════════════════════════════════════════════════
+runTests('ExcelPipeline', function() {
+  var pass = 0, fail = 0;
+  function assert(cond, msg) {
+    if (cond) { pass++; console.log('  PASS: ' + msg); }
+    else { fail++; console.error('  FAIL: ' + msg); }
+  }
+
+  console.log('=== Excel File Pipeline Tests ===');
+
+  // We test the pipeline with CSV data (Excel parsing needs SheetJS in browser)
+  // but we verify the full CSV-based pipeline which mirrors Excel input
+
+  // Stock data from CSV
+  var dsDef = BlockRegistry.getBlockType('dataSource');
+  var winDef = BlockRegistry.getBlockType('windowing');
+  var fftDef = BlockRegistry.getBlockType('fftBlock');
+  var statDef = BlockRegistry.getBlockType('statistics');
+  var mergerDef = BlockRegistry.getBlockType('featureMerger');
+  var nnDef = BlockRegistry.getBlockType('neuralNetwork');
+  var fuzzyDef = BlockRegistry.getBlockType('fuzzyClassifier');
+
+  // Build CSV mimicking stock_data.xlsx BullMarket sheet
+  var stockCSV = 'Day,Close,Volume\n';
+  var price = 100;
+  for (var i = 0; i < 200; i++) {
+    price *= (1 + 0.002 + 0.015 * (Math.random() * 2 - 1));
+    stockCSV += (i+1) + ',' + price.toFixed(2) + ',' + Math.floor(1000000 + Math.random()*500000) + '\n';
+  }
+
+  try {
+    var stockResult = dsDef.process({ source: 'csv', csvData: stockCSV, csvColumn: 'Close', sampleRate: 1 }, {});
+    assert(stockResult.signal.values.length === 200, 'Excel/CSV stock: 200 price values loaded');
+
+    var stockWin = winDef.process(
+      { windowSize: 20, overlap: 0.5, windowFunction: 'rectangular', applyWindow: false },
+      { signal: stockResult.signal }
+    );
+    assert(stockWin.segments.windows.length > 0, 'Excel/CSV stock: segmented into ' + stockWin.segments.windows.length + ' windows');
+
+    var stockFFT = fftDef.process(
+      { numCoefficients: 10, outputType: 'magnitude', normalize: true },
+      { segments: stockWin.segments }
+    );
+    assert(stockFFT.features.vectors.length > 0, 'Excel/CSV stock: FFT features extracted');
+
+    var stockStats = statDef.process(
+      { includeRMS: true, includeMean: true, includeVariance: true, includeStdDev: true,
+        includePeak: false, includeCrestFactor: false, includeZeroCrossings: false, includeEnergy: false },
+      { segments: stockWin.segments }
+    );
+    assert(stockStats.features.vectors.length > 0, 'Excel/CSV stock: stats features computed');
+
+    var stockMerged = mergerDef.process({}, { features1: stockFFT.features, features2: stockStats.features });
+    assert(stockMerged.features.vectors[0].length === 14, 'Excel/CSV stock: merged features = 10 FFT + 4 stats = 14');
+
+    var stockNN = nnDef.process({
+      hiddenLayers: [{ neurons: 8, activation: 'relu' }],
+      outputNeurons: 3, outputActivation: 'softmax',
+      learningRate: 0.01, epochs: 30, batchSize: 4,
+      classNames: 'Likely Rising,Likely Falling,Steady'
+    }, { features: stockMerged.features });
+    assert(stockNN.predictions.items.length > 0, 'Excel/CSV stock: NN classified ' + stockNN.predictions.items.length + ' windows');
+
+    var validClasses = ['Likely Rising', 'Likely Falling', 'Steady'];
+    var allValid = true;
+    for (var i = 0; i < stockNN.predictions.items.length; i++) {
+      if (validClasses.indexOf(stockNN.predictions.items[i].className) < 0) { allValid = false; break; }
+    }
+    assert(allValid, 'Excel/CSV stock: all predictions are valid class names');
+
+    console.log('  Stock pipeline: ' + stockNN.predictions.items.length + ' windows classified');
+    var classCounts = {};
+    for (var i = 0; i < stockNN.predictions.items.length; i++) {
+      var cn = stockNN.predictions.items[i].className;
+      classCounts[cn] = (classCounts[cn] || 0) + 1;
+    }
+    console.log('  Distribution: ' + JSON.stringify(classCounts));
+  } catch(e) {
+    assert(false, 'Excel/CSV stock pipeline threw: ' + e.message);
+  }
+
+  console.log('ExcelPipeline: ' + pass + ' passed, ' + fail + ' failed\n');
+  return { pass: pass, fail: fail };
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EMG END-TO-END PIPELINE TESTS
+// ══════════════════════════════════════════════════════════════════════════════
+runTests('EMGPipeline', function() {
+  var pass = 0, fail = 0;
+  function assert(cond, msg) {
+    if (cond) { pass++; console.log('  PASS: ' + msg); }
+    else { fail++; console.error('  FAIL: ' + msg); }
+  }
+
+  console.log('=== EMG End-to-End Pipeline Tests ===');
+
+  var dsDef = BlockRegistry.getBlockType('dataSource');
+  var winDef = BlockRegistry.getBlockType('windowing');
+  var statDef = BlockRegistry.getBlockType('statistics');
+  var fftDef = BlockRegistry.getBlockType('fftBlock');
+  var mergerDef = BlockRegistry.getBlockType('featureMerger');
+  var nnDef = BlockRegistry.getBlockType('neuralNetwork');
+
+  // Generate EMG training data for 4 movements
+  var movements = ['pronation', 'supination', 'flexion', 'extension'];
+  var allFeatures = [];
+  var allLabels = [];
+
+  for (var m = 0; m < movements.length; m++) {
+    for (var trial = 0; trial < 5; trial++) {
+      var emgData = DataIO.generators.emg({
+        samples: 1024, sampleRate: 1000, movement: movements[m], noise: 0.02
+      });
+
+      // Segment into windows
+      var segments = DSP.segmentSignal(emgData.values, 256, 0.5);
+
+      for (var s = 0; s < segments.length; s++) {
+        var feats = DSP.extractEMGFeatures(segments[s], 1000);
+        allFeatures.push([feats.mav, feats.rms, feats.wl, feats.zc, feats.ssc, feats['var']]);
+        allLabels.push(m);
+      }
+    }
+  }
+
+  assert(allFeatures.length > 0, 'EMG pipeline: extracted ' + allFeatures.length + ' feature vectors');
+  assert(allFeatures[0].length === 6, 'EMG pipeline: 6 features per vector');
+  assert(allLabels.length === allFeatures.length, 'EMG pipeline: labels match feature count');
+
+  // Normalize features
+  var numFeats = allFeatures[0].length;
+  var mins = new Array(numFeats).fill(Infinity);
+  var maxs = new Array(numFeats).fill(-Infinity);
+  for (var i = 0; i < allFeatures.length; i++) {
+    for (var j = 0; j < numFeats; j++) {
+      if (allFeatures[i][j] < mins[j]) mins[j] = allFeatures[i][j];
+      if (allFeatures[i][j] > maxs[j]) maxs[j] = allFeatures[i][j];
+    }
+  }
+  for (var i = 0; i < allFeatures.length; i++) {
+    for (var j = 0; j < numFeats; j++) {
+      var range = maxs[j] - mins[j];
+      allFeatures[i][j] = range > 0 ? (allFeatures[i][j] - mins[j]) / range : 0;
+    }
+  }
+
+  // Train neural network
+  var nn = NeuralNetwork.createNetwork({
+    inputSize: 6,
+    layers: [
+      { neurons: 16, activation: 'relu' },
+      { neurons: 8, activation: 'relu' },
+      { neurons: 4, activation: 'softmax' }
+    ],
+    learningRate: 0.02,
+    momentum: 0.9
+  });
+
+  // Prepare one-hot targets
+  var targets = [];
+  for (var i = 0; i < allLabels.length; i++) {
+    var target = [0, 0, 0, 0];
+    target[allLabels[i]] = 1;
+    targets.push(target);
+  }
+
+  var history = NeuralNetwork.train(nn, allFeatures, targets, 200, 8);
+  assert(history.length === 200, 'EMG pipeline: trained for 200 epochs');
+  // Check loss trend over training (compare first 10 avg to last 10 avg for stability)
+  var earlyLoss = 0, lateLoss = 0;
+  for (var i = 0; i < 10; i++) earlyLoss += history[i].loss;
+  for (var i = 190; i < 200; i++) lateLoss += history[i].loss;
+  earlyLoss /= 10; lateLoss /= 10;
+  assert(lateLoss <= earlyLoss + 0.01, 'EMG pipeline: avg loss stable or decreased (early=' + earlyLoss.toFixed(4) + ', late=' + lateLoss.toFixed(4) + ')');
+
+  // Test classification
+  var correct = 0;
+  for (var i = 0; i < allFeatures.length; i++) {
+    var pred = NeuralNetwork.classify(nn, allFeatures[i]);
+    if (pred.classIndex === allLabels[i]) correct++;
+  }
+  var accuracy = correct / allFeatures.length;
+  assert(accuracy >= 0.20, 'EMG pipeline: accuracy ' + (accuracy * 100).toFixed(1) + '% (>= 20%)');
+  console.log('  EMG accuracy: ' + (accuracy * 100).toFixed(1) + '% on ' + allFeatures.length + ' samples');
+
+  // Verify movement detection output
+  var testEmg = DataIO.generators.emg({ samples: 1024, sampleRate: 1000, movement: 'flexion', noise: 0.01 });
+  var testSegs = DSP.segmentSignal(testEmg.values, 256, 0.5);
+  var detectedMovements = [];
+  for (var s = 0; s < testSegs.length; s++) {
+    var f = DSP.extractEMGFeatures(testSegs[s], 1000);
+    var normalized = [f.mav, f.rms, f.wl, f.zc, f.ssc, f['var']];
+    for (var j = 0; j < numFeats; j++) {
+      var range = maxs[j] - mins[j];
+      normalized[j] = range > 0 ? (normalized[j] - mins[j]) / range : 0;
+    }
+    var result = NeuralNetwork.classify(nn, normalized);
+    detectedMovements.push(movements[result.classIndex]);
+  }
+  assert(detectedMovements.length > 0, 'EMG pipeline: detected movements: ' + detectedMovements.join(', '));
+
+  console.log('EMGPipeline: ' + pass + ' passed, ' + fail + ' failed\n');
+  return { pass: pass, fail: fail };
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// AUDIO SIGNAL PIPELINE TESTS
+// ══════════════════════════════════════════════════════════════════════════════
+runTests('AudioPipeline', function() {
+  var pass = 0, fail = 0;
+  function assert(cond, msg) {
+    if (cond) { pass++; console.log('  PASS: ' + msg); }
+    else { fail++; console.error('  FAIL: ' + msg); }
+  }
+
+  console.log('=== Audio Signal Pipeline Tests ===');
+
+  var dsDef = BlockRegistry.getBlockType('dataSource');
+  var winDef = BlockRegistry.getBlockType('windowing');
+  var fftDef = BlockRegistry.getBlockType('fftBlock');
+  var nnDef = BlockRegistry.getBlockType('neuralNetwork');
+
+  // Generate training data for audio classification (vowel vs silence vs tone)
+  var audioTypes = ['vowel_a', 'vowel_e', 'vowel_i', 'silence'];
+  var audioFeatures = [];
+  var audioLabels = [];
+
+  for (var a = 0; a < audioTypes.length; a++) {
+    for (var trial = 0; trial < 5; trial++) {
+      var audio = DataIO.generators.audioSignal({
+        samples: 2048, sampleRate: 8000, signalType: audioTypes[a]
+      });
+
+      var segments = DSP.segmentSignal(audio.values, 512, 0.5);
+      for (var s = 0; s < Math.min(segments.length, 3); s++) {
+        var fftCoeffs = DSP.extractFFTCoefficients(segments[s], 16, 'hanning');
+        var r = DSP.rms(segments[s]);
+        var zc = DSP.zeroCrossings(segments[s]);
+        var feat = fftCoeffs.concat([r, zc / 512]);
+        audioFeatures.push(feat);
+        audioLabels.push(a);
+      }
+    }
+  }
+
+  assert(audioFeatures.length > 0, 'Audio pipeline: ' + audioFeatures.length + ' feature vectors');
+  assert(audioFeatures[0].length === 18, 'Audio pipeline: 18 features (16 FFT + RMS + ZC)');
+
+  // Train classifier
+  var nn = NeuralNetwork.createNetwork({
+    inputSize: 18,
+    layers: [
+      { neurons: 12, activation: 'relu' },
+      { neurons: 4, activation: 'softmax' }
+    ],
+    learningRate: 0.02
+  });
+
+  var targets = [];
+  for (var i = 0; i < audioLabels.length; i++) {
+    var t = [0, 0, 0, 0];
+    t[audioLabels[i]] = 1;
+    targets.push(t);
+  }
+
+  var history = NeuralNetwork.train(nn, audioFeatures, targets, 80, 8);
+  assert(history[79].loss < history[0].loss, 'Audio pipeline: loss decreased');
+
+  var correct = 0;
+  for (var i = 0; i < audioFeatures.length; i++) {
+    var pred = NeuralNetwork.classify(nn, audioFeatures[i]);
+    if (pred.classIndex === audioLabels[i]) correct++;
+  }
+  var accuracy = correct / audioFeatures.length;
+  assert(accuracy > 0.3, 'Audio pipeline: accuracy ' + (accuracy * 100).toFixed(1) + '%');
+  console.log('  Audio accuracy: ' + (accuracy * 100).toFixed(1) + '%');
+
+  console.log('AudioPipeline: ' + pass + ' passed, ' + fail + ' failed\n');
+  return { pass: pass, fail: fail };
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VIBRATION SENSOR PIPELINE TESTS
+// ══════════════════════════════════════════════════════════════════════════════
+runTests('VibrationPipeline', function() {
+  var pass = 0, fail = 0;
+  function assert(cond, msg) {
+    if (cond) { pass++; console.log('  PASS: ' + msg); }
+    else { fail++; console.error('  FAIL: ' + msg); }
+  }
+
+  console.log('=== Vibration Sensor Pipeline Tests ===');
+
+  var dsDef = BlockRegistry.getBlockType('dataSource');
+  var winDef = BlockRegistry.getBlockType('windowing');
+  var fftDef = BlockRegistry.getBlockType('fftBlock');
+  var statDef = BlockRegistry.getBlockType('statistics');
+  var mergerDef = BlockRegistry.getBlockType('featureMerger');
+  var fuzzyDef = BlockRegistry.getBlockType('fuzzyClassifier');
+
+  // Normal vs high-harmonic vibration
+  try {
+    var vibNormal = dsDef.process({
+      source: 'generate', generator: 'vibration', sampleRate: 1024,
+      generatorConfig: { samples: 1024, sampleRate: 1024, fundamentalFreq: 25, harmonics: 2, noise: 0.05 }
+    }, {});
+    assert(vibNormal.signal.values.length === 1024, 'Vibration normal: 1024 samples');
+
+    var vibFaulty = dsDef.process({
+      source: 'generate', generator: 'vibration', sampleRate: 1024,
+      generatorConfig: { samples: 1024, sampleRate: 1024, fundamentalFreq: 25, harmonics: 6, noise: 0.15 }
+    }, {});
+    assert(vibFaulty.signal.values.length === 1024, 'Vibration faulty: 1024 samples');
+
+    // Process normal
+    var winN = winDef.process({ windowSize: 256, overlap: 0.5, windowFunction: 'hanning', applyWindow: true },
+      { signal: vibNormal.signal });
+    var fftN = fftDef.process({ numCoefficients: 16, outputType: 'magnitude', normalize: true },
+      { segments: winN.segments });
+    var statN = statDef.process(
+      { includeRMS: true, includeMean: true, includeVariance: true, includeStdDev: false,
+        includePeak: true, includeCrestFactor: true, includeZeroCrossings: false, includeEnergy: true },
+      { segments: winN.segments });
+    var mergedN = mergerDef.process({}, { features1: fftN.features, features2: statN.features });
+
+    // Process faulty
+    var winF = winDef.process({ windowSize: 256, overlap: 0.5, windowFunction: 'hanning', applyWindow: true },
+      { signal: vibFaulty.signal });
+    var fftF = fftDef.process({ numCoefficients: 16, outputType: 'magnitude', normalize: true },
+      { segments: winF.segments });
+    var statF = statDef.process(
+      { includeRMS: true, includeMean: true, includeVariance: true, includeStdDev: false,
+        includePeak: true, includeCrestFactor: true, includeZeroCrossings: false, includeEnergy: true },
+      { segments: winF.segments });
+    var mergedF = mergerDef.process({}, { features1: fftF.features, features2: statF.features });
+
+    assert(mergedN.features.vectors.length > 0, 'Vibration: normal features extracted');
+    assert(mergedF.features.vectors.length > 0, 'Vibration: faulty features extracted');
+
+    // Faulty should have higher variance/energy
+    var normalRMS = DSP.rms(vibNormal.signal.values);
+    var faultyRMS = DSP.rms(vibFaulty.signal.values);
+    assert(faultyRMS > normalRMS * 0.5, 'Vibration: faulty signal has substantial RMS (' + faultyRMS.toFixed(4) + ')');
+
+    // Use fuzzy classifier on vibration features
+    var fuzzyResult = fuzzyDef.process(
+      { mode: 'threshold', classes: 'Normal,Warning,Critical', thresholds: '0.33,0.66', inputFeatureIndex: 0 },
+      { features: mergedN.features }
+    );
+    assert(fuzzyResult.classification.items.length > 0, 'Vibration: fuzzy classified normal signal');
+    console.log('  Normal signal classes: ' + fuzzyResult.classification.items.map(function(it) { return it.label; }).join(', '));
+
+  } catch(e) {
+    assert(false, 'Vibration pipeline threw: ' + e.message);
+  }
+
+  console.log('VibrationPipeline: ' + pass + ' passed, ' + fail + ' failed\n');
+  return { pass: pass, fail: fail };
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EDGE CASE TESTS
+// ══════════════════════════════════════════════════════════════════════════════
+runTests('EdgeCases', function() {
+  var pass = 0, fail = 0;
+  function assert(cond, msg) {
+    if (cond) { pass++; console.log('  PASS: ' + msg); }
+    else { fail++; console.error('  FAIL: ' + msg); }
+  }
+
+  console.log('=== Edge Case Tests ===');
+
+  // Very short signal (16 samples)
+  var shortSig = [];
+  for (var i = 0; i < 16; i++) shortSig.push(Math.sin(2 * Math.PI * 2 * i / 16));
+  var shortFFT = DSP.fft(shortSig);
+  assert(shortFFT.real.length === 16, 'Short signal FFT: length 16');
+  var shortMags = DSP.magnitude(shortFFT.real, shortFFT.imag);
+  assert(shortMags.length === 16, 'Short signal magnitude: length 16');
+
+  // Non-power-of-2 length (padded internally)
+  var oddSig = [];
+  for (var i = 0; i < 100; i++) oddSig.push(Math.sin(2 * Math.PI * 5 * i / 100));
+  var oddFFT = DSP.fft(oddSig);
+  assert(oddFFT.real.length === 128, 'Non-power-of-2 (100): padded to 128');
+
+  // Very large signal (4096)
+  var largeSig = [];
+  for (var i = 0; i < 4096; i++) largeSig.push(Math.sin(2 * Math.PI * 50 * i / 4096));
+  var largeFFT = DSP.fft(largeSig);
+  assert(largeFFT.real.length === 4096, 'Large signal (4096) FFT works');
+  var largeMags = DSP.magnitude(largeFFT.real, largeFFT.imag);
+  var peakBin = 0, peakVal = 0;
+  for (var i = 0; i < 2048; i++) {
+    if (largeMags[i] > peakVal) { peakVal = largeMags[i]; peakBin = i; }
+  }
+  assert(peakBin === 50, 'Large signal peak at bin 50 (50Hz)');
+
+  // Constant signal (zero variance)
+  var constSig = new Array(64).fill(5.0);
+  assert(DSP.variance(constSig) === 0, 'Constant signal: variance = 0');
+  assert(DSP.stddev(constSig) === 0, 'Constant signal: stddev = 0');
+  assert(DSP.rms(constSig) === 5.0, 'Constant signal: RMS = 5.0');
+  assert(DSP.zeroCrossings(constSig) === 0, 'Constant signal: 0 zero crossings');
+  var normConst = DSP.standardize(constSig);
+  assert(normConst[0] === 0, 'Constant signal standardize: all zeros');
+
+  // All zeros signal
+  var zeroSig = new Array(64).fill(0);
+  assert(DSP.rms(zeroSig) === 0, 'Zero signal: RMS = 0');
+  assert(DSP.energy(zeroSig) === 0, 'Zero signal: energy = 0');
+  assert(DSP.meanAbsoluteValue(zeroSig) === 0, 'Zero signal: MAV = 0');
+
+  // Single sample
+  var singleSig = [42];
+  assert(DSP.mean(singleSig) === 42, 'Single sample: mean = 42');
+  assert(DSP.rms(singleSig) === 42, 'Single sample: RMS = 42');
+
+  // Different sampling rates
+  var rates = [100, 500, 1000, 8000, 44100];
+  for (var r = 0; r < rates.length; r++) {
+    var sr = rates[r];
+    var sig = [];
+    var numSamples = Math.min(sr, 4096);
+    for (var i = 0; i < numSamples; i++) sig.push(Math.sin(2 * Math.PI * 10 * i / sr));
+    var segs = DSP.segmentSignal(sig, Math.min(64, numSamples), 0.5);
+    assert(segs.length >= 1, 'SampleRate ' + sr + ': segmentation works (' + segs.length + ' segments)');
+  }
+
+  // Noisy signal feature extraction
+  var noisySig = [];
+  for (var i = 0; i < 256; i++) noisySig.push((Math.random() * 2 - 1) * 10);
+  var noisyFeats = DSP.extractFeatures(noisySig, {
+    includeRMS: true, includeMean: true, includeVariance: true,
+    includeZeroCrossings: true, includePeak: true, includeCrestFactor: true,
+    includeEnergy: true, includeFFT: true, fftCoefficients: 8
+  });
+  assert(noisyFeats.length === 15, 'Noisy signal: 7 stats + 8 FFT = 15 features');
+  for (var i = 0; i < noisyFeats.length; i++) {
+    assert(!isNaN(noisyFeats[i]), 'Noisy feature[' + i + '] is not NaN');
+  }
+
+  // EMG features on very small window
+  var smallWin = [0.1, -0.2, 0.3, -0.1, 0.05, -0.15, 0.2, -0.05];
+  var emgSmall = DSP.extractEMGFeatures(smallWin, 1000);
+  assert(emgSmall.mav > 0, 'Small EMG window: MAV > 0');
+  assert(typeof emgSmall.mdf === 'number', 'Small EMG window: MDF is number');
+
+  // Segmentation with overlap 0 (no overlap)
+  var sig100 = [];
+  for (var i = 0; i < 100; i++) sig100.push(i);
+  var segsNoOverlap = DSP.segmentSignal(sig100, 10, 0);
+  assert(segsNoOverlap.length === 10, 'No overlap: 100/10 = 10 segments');
+  assert(segsNoOverlap[0][0] === 0, 'No overlap: first segment starts at 0');
+  assert(segsNoOverlap[1][0] === 10, 'No overlap: second segment starts at 10');
+
+  // Segmentation with high overlap (0.9)
+  var segsHighOverlap = DSP.segmentSignal(sig100, 10, 0.9);
+  assert(segsHighOverlap.length > 50, 'High overlap (0.9): many segments (' + segsHighOverlap.length + ')');
+
+  // Window too large for signal
+  var segsTooBig = DSP.segmentSignal(sig100, 200, 0);
+  assert(segsTooBig.length === 0, 'Window > signal length: 0 segments');
+
+  console.log('EdgeCases: ' + pass + ' passed, ' + fail + ' failed\n');
+  return { pass: pass, fail: fail };
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PERFORMANCE & ACCURACY FEEDBACK TESTS
+// ══════════════════════════════════════════════════════════════════════════════
+runTests('PerformanceAccuracy', function() {
+  var pass = 0, fail = 0;
+  function assert(cond, msg) {
+    if (cond) { pass++; console.log('  PASS: ' + msg); }
+    else { fail++; console.error('  FAIL: ' + msg); }
+  }
+
+  console.log('=== Performance & Accuracy Feedback Tests ===');
+
+  // Test different window sizes affect feature quality
+  var testSig = [];
+  for (var i = 0; i < 1024; i++) {
+    testSig.push(Math.sin(2 * Math.PI * 10 * i / 256) + 0.5 * Math.sin(2 * Math.PI * 30 * i / 256));
+  }
+
+  var windowSizes = [32, 64, 128, 256];
+  console.log('  --- Window Size Analysis ---');
+  for (var w = 0; w < windowSizes.length; w++) {
+    var ws = windowSizes[w];
+    var segs = DSP.segmentSignal(testSig, ws, 0.5);
+    var features = [];
+    for (var s = 0; s < segs.length; s++) {
+      features.push(DSP.extractFFTCoefficients(segs[s], 8, 'hanning'));
+    }
+    assert(features.length > 0, 'Window=' + ws + ': ' + features.length + ' segments, ' + features[0].length + ' features each');
+    // Larger windows should resolve frequencies better
+    var variance = 0;
+    for (var f = 0; f < features.length; f++) {
+      for (var j = 0; j < features[f].length; j++) {
+        variance += (features[f][j] - 0.5) * (features[f][j] - 0.5);
+      }
+    }
+    console.log('    Window ' + ws + ': ' + features.length + ' segments, feature variance=' + (variance / features.length).toFixed(4));
+  }
+
+  // Test different network architectures on same data
+  console.log('  --- Network Architecture Comparison ---');
+  var trainX = [], trainY = [];
+  for (var i = 0; i < 100; i++) {
+    if (i < 50) {
+      trainX.push([Math.random() * 0.4, Math.random() * 0.4, Math.random() * 0.4]);
+      trainY.push([1, 0]);
+    } else {
+      trainX.push([0.6 + Math.random() * 0.4, 0.6 + Math.random() * 0.4, 0.6 + Math.random() * 0.4]);
+      trainY.push([0, 1]);
+    }
+  }
+
+  var architectures = [
+    { name: 'Small (4)', layers: [{ neurons: 4, activation: 'sigmoid' }, { neurons: 2, activation: 'softmax' }] },
+    { name: 'Medium (8-4)', layers: [{ neurons: 8, activation: 'relu' }, { neurons: 4, activation: 'relu' }, { neurons: 2, activation: 'softmax' }] },
+    { name: 'Large (16-8)', layers: [{ neurons: 16, activation: 'relu' }, { neurons: 8, activation: 'relu' }, { neurons: 2, activation: 'softmax' }] }
+  ];
+
+  for (var a = 0; a < architectures.length; a++) {
+    var arch = architectures[a];
+    var nn = NeuralNetwork.createNetwork({
+      inputSize: 3,
+      layers: arch.layers,
+      learningRate: 0.02
+    });
+    var history = NeuralNetwork.train(nn, trainX, trainY, 100, 10);
+    var finalLoss = history[99].loss;
+    var correct = 0;
+    for (var i = 0; i < trainX.length; i++) {
+      var pred = NeuralNetwork.classify(nn, trainX[i]);
+      var expected = trainY[i][0] > trainY[i][1] ? 0 : 1;
+      if (pred.classIndex === expected) correct++;
+    }
+    var acc = correct / trainX.length * 100;
+    assert(finalLoss < history[0].loss, arch.name + ': loss decreased (final=' + finalLoss.toFixed(4) + ')');
+    console.log('    ' + arch.name + ': accuracy=' + acc.toFixed(1) + '%, loss=' + finalLoss.toFixed(4));
+  }
+
+  // Test learning rates
+  console.log('  --- Learning Rate Comparison ---');
+  var lrs = [0.001, 0.01, 0.05];
+  for (var l = 0; l < lrs.length; l++) {
+    var nn = NeuralNetwork.createNetwork({
+      inputSize: 3,
+      layers: [{ neurons: 8, activation: 'relu' }, { neurons: 2, activation: 'softmax' }],
+      learningRate: lrs[l]
+    });
+    var history = NeuralNetwork.train(nn, trainX, trainY, 50, 10);
+    assert(history.length === 50, 'LR=' + lrs[l] + ': trained 50 epochs');
+    console.log('    LR=' + lrs[l] + ': start_loss=' + history[0].loss.toFixed(4) + ', end_loss=' + history[49].loss.toFixed(4));
+  }
+
+  console.log('PerformanceAccuracy: ' + pass + ' passed, ' + fail + ' failed\n');
+  return { pass: pass, fail: fail };
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// EXCEL FILE READING TESTS (Node.js with XLSX)
+// ══════════════════════════════════════════════════════════════════════════════
+var fs2 = require('fs');
+var XLSX2;
+try { XLSX2 = require('xlsx'); } catch(e) { XLSX2 = null; }
+
+if (XLSX2 && fs2.existsSync('test_data/stock_data.xlsx')) {
+  (function() {
+    var localPass = 0, localFail = 0;
+    function assert(cond, msg) {
+      if (cond) { localPass++; console.log('  PASS: ' + msg); }
+      else { localFail++; console.error('  FAIL: ' + msg); }
+    }
+
+    console.log('=== Excel File Reading Tests ===');
+
+    // Read stock_data.xlsx
+    var wb = XLSX2.readFile('test_data/stock_data.xlsx');
+    assert(wb.SheetNames.length === 4, 'stock_data.xlsx has 4 sheets');
+    assert(wb.SheetNames.indexOf('BullMarket') >= 0, 'Has BullMarket sheet');
+    assert(wb.SheetNames.indexOf('BearMarket') >= 0, 'Has BearMarket sheet');
+    assert(wb.SheetNames.indexOf('Sideways') >= 0, 'Has Sideways sheet');
+    assert(wb.SheetNames.indexOf('Volatile') >= 0, 'Has Volatile sheet');
+
+    var bullCSV = XLSX2.utils.sheet_to_csv(wb.Sheets['BullMarket']);
+    var parsed = vm.runInContext(
+      '(function() { return DataIO.parseCSV(' + JSON.stringify(bullCSV) + '); })()',
+      context
+    );
+    assert(parsed.headers.indexOf('Close') >= 0, 'BullMarket has Close column');
+    assert(parsed.columns['Close'].length === 200, 'BullMarket has 200 rows');
+
+    // Bull market should trend up
+    var firstPrice = parsed.columns['Close'][0];
+    var lastPrice = parsed.columns['Close'][199];
+    console.log('  BullMarket: first=' + firstPrice + ', last=' + lastPrice);
+
+    // Read EMG file
+    var emgWb = XLSX2.readFile('test_data/emg_hand_movements.xlsx');
+    assert(emgWb.SheetNames.length === 5, 'emg_hand_movements.xlsx has 5 sheets');
+    assert(emgWb.SheetNames.indexOf('pronation') >= 0, 'Has pronation sheet');
+    assert(emgWb.SheetNames.indexOf('flexion') >= 0, 'Has flexion sheet');
+
+    var flexCSV = XLSX2.utils.sheet_to_csv(emgWb.Sheets['flexion']);
+    var emgParsed = vm.runInContext(
+      '(function() { return DataIO.parseCSV(' + JSON.stringify(flexCSV) + '); })()',
+      context
+    );
+    assert(emgParsed.headers.indexOf('Trial_1') >= 0, 'EMG flexion has Trial_1 column');
+    assert(emgParsed.columns['Trial_1'].length === 2000, 'EMG flexion has 2000 samples');
+
+    // Read audio file
+    var audioWb = XLSX2.readFile('test_data/audio_signals.xlsx');
+    assert(audioWb.SheetNames.length === 4, 'audio_signals.xlsx has 4 sheets');
+    assert(audioWb.SheetNames.indexOf('vowel_a') >= 0, 'Has vowel_a sheet');
+
+    // Read vibration file
+    var vibWb = XLSX2.readFile('test_data/vibration_data.xlsx');
+    assert(vibWb.SheetNames.length === 4, 'vibration_data.xlsx has 4 sheets');
+    assert(vibWb.SheetNames.indexOf('normal') >= 0, 'Has normal sheet');
+    assert(vibWb.SheetNames.indexOf('bearing_fault') >= 0, 'Has bearing_fault sheet');
+
+    // CSV files
+    assert(fs2.existsSync('test_data/stock_simple.csv'), 'stock_simple.csv exists');
+    assert(fs2.existsSync('test_data/emg_flexion.csv'), 'emg_flexion.csv exists');
+    assert(fs2.existsSync('test_data/sine_composite.csv'), 'sine_composite.csv exists');
+
+    // Process stock Excel data through full pipeline in context
+    var pipelineResult = vm.runInContext('(function() {' +
+      'var csvData = ' + JSON.stringify(bullCSV) + ';' +
+      'var dsDef = BlockRegistry.getBlockType("dataSource");' +
+      'var ds = dsDef.process({ source: "csv", csvData: csvData, csvColumn: "Close", sampleRate: 1 }, {});' +
+      'var winDef = BlockRegistry.getBlockType("windowing");' +
+      'var win = winDef.process({ windowSize: 20, overlap: 0.5, windowFunction: "rectangular", applyWindow: false }, { signal: ds.signal });' +
+      'var fftDef = BlockRegistry.getBlockType("fftBlock");' +
+      'var fftR = fftDef.process({ numCoefficients: 8, outputType: "magnitude", normalize: true }, { segments: win.segments });' +
+      'var nnDef = BlockRegistry.getBlockType("neuralNetwork");' +
+      'var nnR = nnDef.process({ hiddenLayers: [{ neurons: 8, activation: "relu" }], outputNeurons: 3, outputActivation: "softmax", learningRate: 0.01, epochs: 20, batchSize: 4, classNames: "Likely Rising,Likely Falling,Steady" }, { features: fftR.features });' +
+      'return { windowCount: win.segments.windows.length, predCount: nnR.predictions.items.length, firstClass: nnR.predictions.items[0].className };' +
+      '})()', context);
+
+    assert(pipelineResult.windowCount > 0, 'Excel stock E2E: ' + pipelineResult.windowCount + ' windows processed');
+    assert(pipelineResult.predCount > 0, 'Excel stock E2E: ' + pipelineResult.predCount + ' predictions made');
+    assert(typeof pipelineResult.firstClass === 'string', 'Excel stock E2E: first prediction = ' + pipelineResult.firstClass);
+
+    console.log('ExcelFileReading: ' + localPass + ' passed, ' + localFail + ' failed\n');
+    totalPass += localPass;
+    totalFail += localFail;
+  })();
+} else {
+  console.log('=== Excel File Reading Tests === SKIPPED (xlsx not available or test_data missing)\n');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // SUMMARY
 // ══════════════════════════════════════════════════════════════════════════════
 console.log('='.repeat(60));

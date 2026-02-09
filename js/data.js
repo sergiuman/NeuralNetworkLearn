@@ -418,6 +418,107 @@ const DataIO = (() => {
       };
     },
 
+    emg(config) {
+      const {
+        samples = 2000,
+        sampleRate = 1000,
+        movement = 'flexion',   // pronation, supination, flexion, extension, rest
+        noise = 0.02,
+        burstRatio = 0.6        // fraction of signal with muscle activation
+      } = config || {};
+
+      const movementParams = {
+        pronation:  { freqRange: [20, 150], burstAmp: 0.8 },
+        supination: { freqRange: [25, 200], burstAmp: 0.9 },
+        flexion:    { freqRange: [30, 250], burstAmp: 1.0 },
+        extension:  { freqRange: [15, 180], burstAmp: 0.7 },
+        rest:       { freqRange: [10, 50],  burstAmp: 0.05 }
+      };
+
+      const p = movementParams[movement] || movementParams.rest;
+      const burstLen = Math.floor(samples * burstRatio);
+      const burstStart = Math.floor((samples - burstLen) / 2);
+      const data = [];
+
+      for (let i = 0; i < samples; i++) {
+        const t = i / sampleRate;
+        let value = 0;
+
+        if (i >= burstStart && i < burstStart + burstLen && movement !== 'rest') {
+          const numMUs = 8;
+          for (let mu = 0; mu < numMUs; mu++) {
+            const freq = p.freqRange[0] + (p.freqRange[1] - p.freqRange[0]) * ((mu + 0.5) / numMUs);
+            const phase = mu * 1.17;  // deterministic for reproducibility
+            const amp = p.burstAmp / numMUs * (0.6 + 0.4 * Math.sin(mu));
+            const burstPhase = (i - burstStart) / burstLen;
+            const envelope = Math.sin(Math.PI * burstPhase);
+            value += amp * envelope * Math.sin(2 * Math.PI * freq * t + phase);
+          }
+        }
+        if (noise > 0) value += (Math.random() * 2 - 1) * noise;
+        data.push(value);
+      }
+
+      return {
+        values: data,
+        sampleRate,
+        labels: data.map((_, i) => (i / sampleRate * 1000).toFixed(1) + 'ms'),
+        name: `EMG (${movement})`,
+        description: `Simulated EMG: ${movement} movement, ${sampleRate}Hz, ${samples} samples`
+      };
+    },
+
+    audioSignal(config) {
+      const {
+        samples = 4000,
+        sampleRate = 8000,
+        signalType = 'vowel_a',  // vowel_a, vowel_e, vowel_i, silence, tone
+        noise = 0.005
+      } = config || {};
+
+      const formants = {
+        vowel_a: { f1: 730, f2: 1090, f3: 2440 },
+        vowel_e: { f1: 530, f2: 1840, f3: 2480 },
+        vowel_i: { f1: 270, f2: 2290, f3: 3010 },
+        tone:    { f1: 440, f2: 0, f3: 0 },
+        silence: { f1: 0, f2: 0, f3: 0 }
+      };
+
+      const f = formants[signalType] || formants.silence;
+      const duration = samples / sampleRate;
+      const data = [];
+
+      for (let i = 0; i < samples; i++) {
+        const t = i / sampleRate;
+        let value = 0;
+
+        if (f.f1 > 0) {
+          if (signalType === 'tone') {
+            value = 0.8 * Math.sin(2 * Math.PI * f.f1 * t);
+          } else {
+            const f0 = 120;
+            const source = 2 * ((f0 * t) % 1) - 1;
+            value = source * 0.3;
+            value += 0.4 * Math.sin(2 * Math.PI * f.f1 * t);
+            if (f.f2 > 0) value += 0.2 * Math.sin(2 * Math.PI * f.f2 * t);
+            if (f.f3 > 0) value += 0.1 * Math.sin(2 * Math.PI * f.f3 * t);
+          }
+          const env = Math.min(1, Math.min(t / 0.05, (duration - t) / 0.05));
+          value *= env;
+        }
+        if (noise > 0) value += (Math.random() * 2 - 1) * noise;
+        data.push(value);
+      }
+
+      return {
+        values: data,
+        sampleRate,
+        labels: data.map((_, i) => (i / sampleRate * 1000).toFixed(1) + 'ms'),
+        name: `Audio (${signalType})`,
+        description: `Simulated audio: ${signalType}, ${sampleRate}Hz, ${samples} samples`
+      };
+    },
+
     randomWalk(config) {
       const {
         samples = 256,
