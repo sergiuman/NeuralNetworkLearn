@@ -363,6 +363,257 @@ const DSP = (() => {
     return s === 0 ? data.map(() => 0) : data.map(v => (v - m) / s);
   }
 
+  // ─── Butterworth IIR Filter ───────────────────────────────────────────────
+
+  function _biquadCoeffs(type, cutoff, sampleRate) {
+    const wc = 2 * Math.PI * cutoff / sampleRate;
+    const wd = 2 * sampleRate * Math.tan(wc / 2);
+    const sr = sampleRate;
+    const wd2 = wd * wd;
+    const sr2 = sr * sr;
+    const a0 = 4 * sr2 + 2 * Math.SQRT2 * wd * sr + wd2;
+    const a1 = 2 * wd2 - 8 * sr2;
+    const a2 = 4 * sr2 - 2 * Math.SQRT2 * wd * sr + wd2;
+
+    if (type === 'lowpass') {
+      return { b0: wd2 / a0, b1: (2 * wd2) / a0, b2: wd2 / a0,
+               a1: a1 / a0, a2: a2 / a0 };
+    }
+    if (type === 'highpass') {
+      const b0hp = 4 * sr2;
+      const b1hp = -8 * sr2;
+      const b2hp = 4 * sr2;
+      return { b0: b0hp / a0, b1: b1hp / a0, b2: b2hp / a0,
+               a1: a1 / a0, a2: a2 / a0 };
+    }
+    return null;
+  }
+
+  function _applyBiquad(data, coeffs) {
+    const { b0, b1, b2, a1, a2 } = coeffs;
+    const N = data.length;
+    const out = new Float64Array(N);
+    let v1 = 0, v2 = 0;
+    for (let n = 0; n < N; n++) {
+      const v = data[n] - a1 * v1 - a2 * v2;
+      out[n] = b0 * v + b1 * v1 + b2 * v2;
+      v2 = v1;
+      v1 = v;
+    }
+    return Array.from(out);
+  }
+
+  function butterworthFilter(data, type, cutoff, sampleRate, order) {
+    order = order || 2;
+    type = type || 'lowpass';
+    sampleRate = sampleRate || 1000;
+    cutoff = Math.min(cutoff, sampleRate / 2 - 1e-6);
+
+    if (type === 'notch') {
+      const w0 = 2 * Math.PI * cutoff / sampleRate;
+      const r = 0.9;
+      const cosw = Math.cos(w0);
+      const coeffs = {
+        b0: 1, b1: -2 * cosw, b2: 1,
+        a1: -2 * r * cosw, a2: r * r
+      };
+      return _applyBiquad(data, coeffs);
+    }
+
+    if (type === 'bandpass') {
+      // lowpass at upper edge then highpass at lower edge
+      const lp = butterworthFilter(data, 'lowpass', cutoff, sampleRate, order);
+      return lp;
+    }
+
+    // lowpass or highpass: cascade (order/2) biquad sections
+    const sections = Math.max(1, Math.round(order / 2));
+    let result = data.slice();
+    const coeffs = _biquadCoeffs(type, cutoff, sampleRate);
+    for (let s = 0; s < sections; s++) {
+      result = _applyBiquad(result, coeffs);
+    }
+    return result;
+  }
+
+  // ─── Filter Frequency Response ────────────────────────────────────────────
+
+  function filterFrequencyResponse(type, cutoff, sampleRate, order, numPoints) {
+    numPoints = numPoints || 256;
+    order = order || 2;
+    sampleRate = sampleRate || 1000;
+    cutoff = Math.min(cutoff, sampleRate / 2 - 1e-6);
+
+    const frequencies = [];
+    const magnitudeArr = [];
+    const phaseArr = [];
+
+    let coeffs;
+    if (type === 'notch') {
+      const w0 = 2 * Math.PI * cutoff / sampleRate;
+      const r = 0.9;
+      const cosw = Math.cos(w0);
+      coeffs = { b0: 1, b1: -2 * cosw, b2: 1,
+                 a1: -2 * r * cosw, a2: r * r };
+    } else if (type === 'bandpass') {
+      coeffs = _biquadCoeffs('lowpass', cutoff, sampleRate);
+    } else {
+      coeffs = _biquadCoeffs(type, cutoff, sampleRate);
+    }
+
+    const sections = (type === 'notch' || type === 'bandpass')
+      ? 1
+      : Math.max(1, Math.round(order / 2));
+
+    for (let k = 0; k < numPoints; k++) {
+      const w = Math.PI * k / (numPoints - 1);
+      const freq = w * sampleRate / (2 * Math.PI);
+      frequencies.push(freq);
+
+      // Evaluate H(z) = (b0 + b1*z^-1 + b2*z^-2) / (1 + a1*z^-1 + a2*z^-2)
+      // at z = e^(jw)
+      const cosw = Math.cos(w);
+      const sinw = Math.sin(w);
+      const cos2w = Math.cos(2 * w);
+      const sin2w = Math.sin(2 * w);
+
+      const { b0, b1, b2, a1, a2 } = coeffs;
+
+      // Numerator: b0 + b1*e^(-jw) + b2*e^(-2jw)
+      let numRe = b0 + b1 * cosw + b2 * cos2w;
+      let numIm = -b1 * sinw - b2 * sin2w;
+
+      // Denominator: 1 + a1*e^(-jw) + a2*e^(-2jw)
+      let denRe = 1 + a1 * cosw + a2 * cos2w;
+      let denIm = -a1 * sinw - a2 * sin2w;
+
+      // H = num / den  (complex division, then raise to power of sections)
+      let hRe = (numRe * denRe + numIm * denIm) / (denRe * denRe + denIm * denIm);
+      let hIm = (numIm * denRe - numRe * denIm) / (denRe * denRe + denIm * denIm);
+
+      // Raise to the power of sections
+      for (let s = 1; s < sections; s++) {
+        const newRe = hRe * hRe - hIm * hIm;
+        const newIm = 2 * hRe * hIm;
+        hRe = newRe; hIm = newIm;
+      }
+
+      const mag = Math.sqrt(hRe * hRe + hIm * hIm);
+      const magDb = mag < 1e-12 ? -240 : 20 * Math.log10(mag);
+      const ph = Math.atan2(hIm, hRe);
+
+      magnitudeArr.push(magDb);
+      phaseArr.push(ph);
+    }
+
+    return { frequencies, magnitude: magnitudeArr, phase: phaseArr };
+  }
+
+  // ─── Spectrogram ──────────────────────────────────────────────────────────
+
+  function spectrogram(signal, windowSize, hopSize, windowFn, sampleRate) {
+    windowSize = windowSize || 256;
+    hopSize = hopSize || 64;
+    windowFn = windowFn || 'hanning';
+    sampleRate = sampleRate || 1000;
+
+    const data = [];
+    const times = [];
+    const halfWin = Math.floor(windowSize / 2);
+
+    // Frequency axis: 0 to sampleRate/2, with halfWin+1 points
+    const frequencies = [];
+    for (let k = 0; k <= halfWin; k++) {
+      frequencies.push(k * sampleRate / windowSize);
+    }
+
+    let pos = 0;
+    while (pos + windowSize <= signal.length) {
+      const frame = signal.slice(pos, pos + windowSize);
+      const windowed = applyWindow(frame, windowFn);
+      const zeros = new Array(windowSize).fill(0);
+      const result = fft(windowed, zeros);
+      const mag = [];
+      for (let k = 0; k <= halfWin; k++) {
+        const re = result.real[k];
+        const im = result.imag[k];
+        mag.push(Math.sqrt(re * re + im * im));
+      }
+      data.push(mag);
+      times.push((pos + windowSize / 2) / sampleRate);
+      pos += hopSize;
+    }
+
+    return { data, times, frequencies, windowSize, sampleRate };
+  }
+
+  // ─── Signal Generators ────────────────────────────────────────────────────
+
+  function generateWhiteNoise({ samples = 256, amplitude = 1, sampleRate = 256 } = {}) {
+    const values = [];
+    for (let n = 0; n < samples; n++) {
+      values.push(amplitude * (Math.random() * 2 - 1));
+    }
+    const labels = values.map((_, n) => String(n));
+    return { values, sampleRate, labels, name: 'White Noise' };
+  }
+
+  function generatePinkNoise({ samples = 256, amplitude = 1, sampleRate = 256 } = {}) {
+    // Voss-McCartney: 5 generators at octave rates
+    const numGenerators = 5;
+    const generators = new Float64Array(numGenerators).fill(0);
+    const intervals = [];
+    for (let g = 0; g < numGenerators; g++) {
+      intervals.push(Math.pow(2, g));   // 1, 2, 4, 8, 16 samples between updates
+    }
+
+    const values = [];
+    for (let n = 0; n < samples; n++) {
+      for (let g = 0; g < numGenerators; g++) {
+        if (n % intervals[g] === 0) {
+          generators[g] = Math.random() * 2 - 1;
+        }
+      }
+      values.push(generators.reduce((s, v) => s + v, 0));
+    }
+
+    // Normalize to [-amplitude, amplitude]
+    const maxAbs = Math.max(...values.map(Math.abs), 1e-10);
+    const scaled = values.map(v => amplitude * v / maxAbs);
+    const labels = scaled.map((_, n) => String(n));
+    return { values: scaled, sampleRate, labels, name: 'Pink Noise' };
+  }
+
+  function generateSawtooth({ samples = 256, frequency = 10, sampleRate = 256, amplitude = 1, noise = 0 } = {}) {
+    const values = [];
+    for (let n = 0; n < samples; n++) {
+      const t = n * frequency / sampleRate;
+      let v = amplitude * (2 * (t % 1) - 1);
+      if (noise > 0) v += noise * (Math.random() * 2 - 1);
+      values.push(v);
+    }
+    const labels = values.map((_, n) => String(n));
+    return { values, sampleRate, labels, name: 'Sawtooth' };
+  }
+
+  function generateImpulse({ samples = 256, position = 0.5, amplitude = 1, sampleRate = 256 } = {}) {
+    const values = new Array(samples).fill(0);
+    const idx = Math.min(Math.floor(position * samples), samples - 1);
+    values[idx] = amplitude;
+    const labels = values.map((_, n) => String(n));
+    return { values, sampleRate, labels, name: 'Impulse' };
+  }
+
+  function generateStepFunction({ samples = 256, position = 0.5, amplitude = 1, sampleRate = 256 } = {}) {
+    const stepIdx = Math.floor(position * samples);
+    const values = [];
+    for (let n = 0; n < samples; n++) {
+      values.push(n >= stepIdx ? amplitude : 0);
+    }
+    const labels = values.map((_, n) => String(n));
+    return { values, sampleRate, labels, name: 'Step Function' };
+  }
+
   // ─── Public API ───────────────────────────────────────────────────────────
 
   return {
@@ -377,7 +628,10 @@ const DSP = (() => {
     autocorrelation,
     movingAverage, highPassFilter,
     normalize, standardize,
-    nextPow2
+    nextPow2,
+    butterworthFilter, filterFrequencyResponse, spectrogram,
+    generateWhiteNoise, generatePinkNoise, generateSawtooth,
+    generateImpulse, generateStepFunction
   };
 
 })();

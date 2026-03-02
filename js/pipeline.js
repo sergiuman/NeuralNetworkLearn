@@ -20,8 +20,14 @@ const PipelineEditor = (() => {
     blockResults: {},
     onBlockSelect: null,
     onPipelineChange: null,
-    onRunComplete: null
+    onRunComplete: null,
+    onBlockContextMenu: null
   };
+
+  const MAX_HISTORY = 50;
+  let history = [];
+  let historyIndex = -1;
+  let _skipHistory = false;
 
   const BLOCK_WIDTH = 180;
   const BLOCK_HEIGHT = 'auto';
@@ -38,6 +44,7 @@ const PipelineEditor = (() => {
     state.onBlockSelect = options?.onBlockSelect;
     state.onPipelineChange = options?.onPipelineChange;
     state.onRunComplete = options?.onRunComplete;
+    state.onBlockContextMenu = options?.onBlockContextMenu;
 
     // Create SVG layer for connections
     state.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -74,6 +81,12 @@ const PipelineEditor = (() => {
 
     // Keyboard
     document.addEventListener('keydown', onKeyDown);
+
+    // Tooltip
+    createTooltip();
+
+    // Initialise history with the empty canvas snapshot
+    saveToHistory();
   }
 
   // ─── Block Management ─────────────────────────────────────────────────────
@@ -160,6 +173,93 @@ const PipelineEditor = (() => {
 
   // ─── Rendering ────────────────────────────────────────────────────────────
 
+  // ─── Tooltip ──────────────────────────────────────────────────────────────
+
+  let _tooltip = null;
+
+  function createTooltip() {
+    if (document.getElementById('sf-tooltip')) {
+      _tooltip = document.getElementById('sf-tooltip');
+      return;
+    }
+    _tooltip = document.createElement('div');
+    _tooltip.id = 'sf-tooltip';
+    document.body.appendChild(_tooltip);
+  }
+
+  function showTooltip(html, event) {
+    if (!_tooltip) return;
+    _tooltip.innerHTML = html;
+    positionTooltip(event);
+    _tooltip.classList.add('visible');
+  }
+
+  function positionTooltip(event) {
+    if (!_tooltip) return;
+    const margin = 16;
+    const tw = _tooltip.offsetWidth || 220;
+    const th = _tooltip.offsetHeight || 80;
+    let x = event.clientX + margin;
+    let y = event.clientY + margin;
+    if (x + tw > window.innerWidth - 8) x = event.clientX - tw - margin;
+    if (y + th > window.innerHeight - 8) y = event.clientY - th - margin;
+    _tooltip.style.left = x + 'px';
+    _tooltip.style.top = y + 'px';
+  }
+
+  function hideTooltip() {
+    if (!_tooltip) return;
+    _tooltip.classList.remove('visible');
+  }
+
+  function blockTooltipHtml(def) {
+    return `
+      <div class="tt-title">
+        <span>${def.icon || ''}</span>
+        <span>${def.name}</span>
+        <span class="tt-badge">${def.category || ''}</span>
+      </div>
+      <div class="tt-body">${def.description || ''}</div>
+    `;
+  }
+
+  function portTooltipHtml(port, dir) {
+    const badgeClass = dir === 'output' ? 'tt-out' : '';
+    const optBadge = port.optional
+      ? '<span class="tt-badge tt-opt">optional</span>' : '';
+    return `
+      <div class="tt-title">
+        <span>${port.label}</span>
+        <span class="tt-badge ${badgeClass}">${dir}</span>
+        ${optBadge}
+      </div>
+      <div class="tt-body">${port.description || ''}</div>
+      <div class="tt-type">data type: ${port.type}</div>
+    `;
+  }
+
+  function connTooltipHtml(conn) {
+    const fromBlock = getBlock(conn.fromBlock);
+    const toBlock = getBlock(conn.toBlock);
+    if (!fromBlock || !toBlock) return '';
+    const fromDef = fromBlock._def;
+    const toDef = toBlock._def;
+    const outPort = fromDef.outputs[conn.fromPort];
+    const inPort = toDef.inputs[conn.toPort];
+    return `
+      <div class="tt-title">
+        <span>Connection</span>
+        <span class="tt-badge tt-conn">${outPort ? outPort.type : 'data'}</span>
+      </div>
+      <div class="tt-body">
+        <b>${fromDef.icon} ${fromDef.name}</b> &rarr; ${outPort ? outPort.label : '?'}<br>
+        &nbsp;&nbsp;&darr;<br>
+        <b>${toDef.icon} ${toDef.name}</b> &larr; ${inPort ? inPort.label : '?'}
+      </div>
+      <div class="tt-hint">Click to remove this connection</div>
+    `;
+  }
+
   function renderBlock(block) {
     const def = block._def || BlockRegistry.getBlockType(block.type);
     if (!def) return;
@@ -234,6 +334,16 @@ const PipelineEditor = (() => {
     preview.id = `${block.id}-preview`;
     el.appendChild(preview);
 
+    // Model badge (visible only for classifier blocks)
+    if (def.category === 'classifier') {
+      const badge = document.createElement('div');
+      badge.className = 'block-model-badge no-model';
+      badge.id = `${block.id}-model-badge`;
+      badge.title = 'No trained model — click Train first';
+      badge.textContent = '⚠ No model';
+      el.appendChild(badge);
+    }
+
     // Event handlers
     header.addEventListener('mousedown', (e) => {
       if (e.target.classList.contains('block-remove')) return;
@@ -256,7 +366,55 @@ const PipelineEditor = (() => {
       dot.addEventListener('mousedown', onPortMouseDown);
     });
 
+    // ── Tooltip: block header ────────────────────────────────────────────────
+    header.addEventListener('mouseenter', (e) => showTooltip(blockTooltipHtml(def), e));
+    header.addEventListener('mousemove', positionTooltip);
+    header.addEventListener('mouseleave', hideTooltip);
+
+    // ── Tooltip: input ports ─────────────────────────────────────────────────
+    el.querySelectorAll('.input-port').forEach((portEl, i) => {
+      const port = def.inputs[i];
+      if (!port) return;
+      portEl.addEventListener('mouseenter', (e) => { e.stopPropagation(); showTooltip(portTooltipHtml(port, 'input'), e); });
+      portEl.addEventListener('mousemove', (e) => { e.stopPropagation(); positionTooltip(e); });
+      portEl.addEventListener('mouseleave', hideTooltip);
+    });
+
+    // ── Tooltip: output ports ────────────────────────────────────────────────
+    el.querySelectorAll('.output-port').forEach((portEl, i) => {
+      const port = def.outputs[i];
+      if (!port) return;
+      portEl.addEventListener('mouseenter', (e) => { e.stopPropagation(); showTooltip(portTooltipHtml(port, 'output'), e); });
+      portEl.addEventListener('mousemove', (e) => { e.stopPropagation(); positionTooltip(e); });
+      portEl.addEventListener('mouseleave', hideTooltip);
+    });
+
+    // Context menu (right-click)
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (state.onBlockContextMenu) state.onBlockContextMenu(block, e.clientX, e.clientY);
+    });
+
     state.blocksContainer.appendChild(el);
+  }
+
+  function updateModelBadge(blockId, isTrained, runMode) {
+    const badge = document.getElementById(`${blockId}-model-badge`);
+    if (!badge) return;
+    if (isTrained) {
+      badge.className = 'block-model-badge trained';
+      badge.textContent = '✓ Trained';
+      badge.title = 'Model is trained and ready for inference';
+    } else if (runMode === 'infer') {
+      badge.className = 'block-model-badge no-model';
+      badge.textContent = '⚠ No model';
+      badge.title = 'No trained model — run Train first';
+    } else {
+      badge.className = 'block-model-badge no-model';
+      badge.textContent = '⚠ No model';
+      badge.title = 'No trained model yet';
+    }
   }
 
   function renderConnections() {
@@ -298,13 +456,16 @@ const PipelineEditor = (() => {
         e.stopPropagation();
         removeConnection(i);
       });
-      hitPath.addEventListener('mouseenter', () => {
+      hitPath.addEventListener('mouseenter', (e) => {
         path.setAttribute('stroke', '#FF5252');
         path.setAttribute('stroke-width', '3');
+        showTooltip(connTooltipHtml(conn), e);
       });
+      hitPath.addEventListener('mousemove', positionTooltip);
       hitPath.addEventListener('mouseleave', () => {
         path.setAttribute('stroke', '#4FC3F7');
         path.setAttribute('stroke-width', '2.5');
+        hideTooltip();
       });
       state.svg.insertBefore(hitPath, state.tempLine);
     }
@@ -354,6 +515,24 @@ const PipelineEditor = (() => {
     }
   }
 
+  // ─── Connection Validation Visual Feedback ────────────────────────────────
+
+  function highlightCompatiblePorts(sourceType, sourceDir) {
+    document.querySelectorAll('.block-port').forEach(portEl => {
+      const dir = portEl.classList.contains('input-port') ? 'input' : 'output';
+      if (dir === sourceDir) return; // Can't connect same direction
+      const portType = portEl.getAttribute('data-port-type');
+      const isCompatible = portType === sourceType || sourceType === 'any' || portType === 'any';
+      portEl.classList.add(isCompatible ? 'port-compatible' : 'port-incompatible');
+    });
+  }
+
+  function clearPortHighlights() {
+    document.querySelectorAll('.block-port').forEach(portEl => {
+      portEl.classList.remove('port-compatible', 'port-incompatible');
+    });
+  }
+
   // ─── Port Connection Logic ────────────────────────────────────────────────
 
   function onPortMouseDown(e) {
@@ -375,6 +554,8 @@ const PipelineEditor = (() => {
         startY: e.clientY
       };
       state.tempLine.style.display = 'block';
+      const srcType = portEl.getAttribute('data-port-type') || 'any';
+      highlightCompatiblePorts(srcType, 'output');
     } else if (portDir === 'input') {
       // Check if there's an existing connection to this input - if so, start reconnecting
       const existing = state.connections.findIndex(
@@ -391,6 +572,10 @@ const PipelineEditor = (() => {
         state.connections.splice(existing, 1);
         renderConnections();
         state.tempLine.style.display = 'block';
+        // Highlight based on the original output port type
+        const fromBlock = getBlock(conn.fromBlock);
+        const srcType = (fromBlock?._def?.outputs[conn.fromPort]?.type) || 'any';
+        highlightCompatiblePorts(srcType, 'output');
       } else {
         // Start reverse connection
         state.connecting = {
@@ -401,6 +586,8 @@ const PipelineEditor = (() => {
           reverse: true
         };
         state.tempLine.style.display = 'block';
+        const srcType = portEl.getAttribute('data-port-type') || 'any';
+        highlightCompatiblePorts(srcType, 'input');
       }
     }
   }
@@ -521,6 +708,7 @@ const PipelineEditor = (() => {
           }
         }
       }
+      clearPortHighlights();
       state.connecting = null;
       state.tempLine.style.display = 'none';
     }
@@ -540,6 +728,23 @@ const PipelineEditor = (() => {
   }
 
   function onKeyDown(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault();
+      undo();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+      e.preventDefault();
+      redo();
+      return;
+    }
+    if (e.key === 'f' || e.key === 'F') {
+      if (!e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        fitToScreen();
+        return;
+      }
+    }
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (state.selectedBlock && !e.target.matches('input, textarea, select')) {
         removeBlock(state.selectedBlock);
@@ -627,7 +832,8 @@ const PipelineEditor = (() => {
     return order;
   }
 
-  function run() {
+  function run(mode) {
+    const runMode = mode || 'train';
     state.blockResults = {};
     const order = getExecutionOrder();
     const errors = [];
@@ -663,8 +869,15 @@ const PipelineEditor = (() => {
           }
         }
 
-        // Process
+        // Inject run mode into config before processing
+        block.config._runMode = runMode;
         const result = def.process(block.config, inputs);
+        // Update model badge for classifier blocks
+        if (def.category === 'classifier') {
+          updateModelBadge(blockId, block.config._isTrained, runMode);
+        }
+        delete block.config._runMode;
+
         state.blockResults[blockId] = result;
         setBlockStatus(blockId, 'success');
 
@@ -683,11 +896,16 @@ const PipelineEditor = (() => {
       state.onRunComplete({
         results: state.blockResults,
         errors,
-        order
+        order,
+        runMode
       });
     }
 
     return { results: state.blockResults, errors };
+  }
+
+  function runInference() {
+    return run('infer');
   }
 
   function setBlockStatus(blockId, status, message) {
@@ -884,13 +1102,243 @@ const PipelineEditor = (() => {
           { fromBlock: 'b3', fromPort: 0, toBlock: 'b4', toPort: 0 },
           { fromBlock: 'b4', fromPort: 0, toBlock: 'b6', toPort: 4 }
         ]
+      },
+      'heart-rate-monitor': {
+        blocks: [
+          { id: 'b1', type: 'dataSource', x: 50, y: 120, config: {
+            source: 'generate', generator: 'ecg', sampleRate: 360,
+            generatorConfig: { samples: 720, sampleRate: 360, heartRate: 72, noise: 0.02 }
+          }},
+          { id: 'b2', type: 'fftBlock', x: 290, y: 120, config: {
+            numCoefficients: 20, outputType: 'magnitude', normalize: true
+          }},
+          { id: 'b3', type: 'output', x: 50, y: 380, config: { title: 'ECG Signal', chartType: 'auto' }},
+          { id: 'b4', type: 'output', x: 530, y: 120, config: { title: 'Heart Rate Spectrum', chartType: 'auto' }}
+        ],
+        connections: [
+          { fromBlock: 'b1', fromPort: 0, toBlock: 'b2', toPort: 0 },
+          { fromBlock: 'b1', fromPort: 0, toBlock: 'b3', toPort: 0 },
+          { fromBlock: 'b2', fromPort: 1, toBlock: 'b4', toPort: 1 }
+        ]
+      },
+      'noise-cancellation': {
+        blocks: [
+          { id: 'b1', type: 'dataSource', x: 50, y: 140, config: {
+            source: 'generate', generator: 'sine', sampleRate: 256,
+            generatorConfig: { samples: 512, frequency: 5, sampleRate: 256, amplitude: 1, noise: 0.8 }
+          }},
+          { id: 'b2', type: 'filter', x: 290, y: 140, config: {
+            filterType: 'lowpass', cutoffFreq: 10, order: 4
+          }},
+          { id: 'b3', type: 'output', x: 50, y: 380, config: { title: 'Original (Noisy)', chartType: 'auto' }},
+          { id: 'b4', type: 'output', x: 530, y: 140, config: { title: 'Filtered Signal', chartType: 'auto' }}
+        ],
+        connections: [
+          { fromBlock: 'b1', fromPort: 0, toBlock: 'b2', toPort: 0 },
+          { fromBlock: 'b1', fromPort: 0, toBlock: 'b3', toPort: 0 },
+          { fromBlock: 'b2', fromPort: 0, toBlock: 'b4', toPort: 0 }
+        ]
+      },
+      'emg-envelope': {
+        blocks: [
+          { id: 'b1', type: 'dataSource', x: 30, y: 130, config: {
+            source: 'generate', generator: 'emg', sampleRate: 1000,
+            generatorConfig: { samples: 1000, sampleRate: 1000, gestures: 3, amplitude: 1, noise: 0.1 }
+          }},
+          { id: 'b2', type: 'rectifier', x: 260, y: 130, config: { mode: 'full' }},
+          { id: 'b3', type: 'windowing', x: 490, y: 130, config: {
+            windowSize: 50, overlap: 0.5, windowFunction: 'rectangular', applyWindow: false
+          }},
+          { id: 'b4', type: 'statistics', x: 730, y: 130, config: {
+            includeRMS: true, includeMean: true, includeVariance: false, includeStdDev: false,
+            includePeak: true, includeCrestFactor: false, includeZeroCrossings: false, includeEnergy: true
+          }},
+          { id: 'b5', type: 'output', x: 30, y: 380, config: { title: 'Raw EMG', chartType: 'auto' }},
+          { id: 'b6', type: 'output', x: 970, y: 130, config: { title: 'EMG Features', chartType: 'auto' }}
+        ],
+        connections: [
+          { fromBlock: 'b1', fromPort: 0, toBlock: 'b2', toPort: 0 },
+          { fromBlock: 'b1', fromPort: 0, toBlock: 'b5', toPort: 0 },
+          { fromBlock: 'b2', fromPort: 0, toBlock: 'b3', toPort: 0 },
+          { fromBlock: 'b3', fromPort: 0, toBlock: 'b4', toPort: 1 },
+          { fromBlock: 'b4', fromPort: 0, toBlock: 'b6', toPort: 2 }
+        ]
+      },
+      'vibration-analysis': {
+        blocks: [
+          { id: 'b1', type: 'dataSource', x: 30, y: 130, config: {
+            source: 'generate', generator: 'vibration', sampleRate: 512,
+            generatorConfig: { samples: 512, sampleRate: 512, fundamentalFreq: 50, harmonics: 3, amplitude: 1, noise: 0.1 }
+          }},
+          { id: 'b2', type: 'windowing', x: 260, y: 130, config: {
+            windowSize: 128, overlap: 0.5, windowFunction: 'hanning', applyWindow: true
+          }},
+          { id: 'b3', type: 'fftBlock', x: 490, y: 80, config: {
+            numCoefficients: 16, outputType: 'magnitude', normalize: true
+          }},
+          { id: 'b4', type: 'statistics', x: 490, y: 270, config: {
+            includeRMS: true, includeMean: false, includeVariance: false, includeStdDev: false,
+            includePeak: true, includeCrestFactor: true, includeZeroCrossings: false, includeEnergy: true
+          }},
+          { id: 'b5', type: 'output', x: 30, y: 380, config: { title: 'Vibration Signal', chartType: 'auto' }},
+          { id: 'b6', type: 'output', x: 730, y: 80, config: { title: 'Frequency Spectrum', chartType: 'auto' }}
+        ],
+        connections: [
+          { fromBlock: 'b1', fromPort: 0, toBlock: 'b2', toPort: 0 },
+          { fromBlock: 'b1', fromPort: 0, toBlock: 'b5', toPort: 0 },
+          { fromBlock: 'b2', fromPort: 0, toBlock: 'b3', toPort: 1 },
+          { fromBlock: 'b2', fromPort: 0, toBlock: 'b4', toPort: 1 },
+          { fromBlock: 'b3', fromPort: 1, toBlock: 'b6', toPort: 1 }
+        ]
+      },
+      'spectrogram-demo': {
+        blocks: [
+          { id: 'b1', type: 'dataSource', x: 50, y: 130, config: {
+            source: 'generate', generator: 'chirp', sampleRate: 256,
+            generatorConfig: { samples: 512, startFreq: 2, endFreq: 60, sampleRate: 256, amplitude: 1 }
+          }},
+          { id: 'b2', type: 'spectrogramBlock', x: 290, y: 130, config: {
+            windowSize: 64, hopSize: 16, windowFunction: 'hanning'
+          }},
+          { id: 'b3', type: 'output', x: 50, y: 370, config: { title: 'Chirp Signal', chartType: 'auto' }},
+          { id: 'b4', type: 'output', x: 530, y: 130, config: { title: 'Spectrogram', chartType: 'auto' }}
+        ],
+        connections: [
+          { fromBlock: 'b1', fromPort: 0, toBlock: 'b2', toPort: 0 },
+          { fromBlock: 'b1', fromPort: 0, toBlock: 'b3', toPort: 0 },
+          { fromBlock: 'b2', fromPort: 0, toBlock: 'b4', toPort: 0 }
+        ]
       }
     };
   }
 
+  // ─── Fit to Screen ────────────────────────────────────────────────────────
+
+  function fitToScreen() {
+    if (state.blocks.length === 0) return;
+    const canvasRect = state.canvas.getBoundingClientRect();
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    state.blocks.forEach(b => {
+      const el = document.getElementById(b.id);
+      if (!el) return;
+      const w = el.offsetWidth || 180;
+      const h = el.offsetHeight || 120;
+      minX = Math.min(minX, b.x);
+      minY = Math.min(minY, b.y);
+      maxX = Math.max(maxX, b.x + w);
+      maxY = Math.max(maxY, b.y + h);
+    });
+    const padding = 60;
+    const contentW = maxX - minX + padding * 2;
+    const contentH = maxY - minY + padding * 2;
+    const scaleX = canvasRect.width / contentW;
+    const scaleY = canvasRect.height / contentH;
+    const scale = Math.min(scaleX, scaleY, 1); // eslint-disable-line no-unused-vars
+    // Shift all blocks so they're centred
+    const targetCX = canvasRect.width / 2;
+    const targetCY = canvasRect.height / 2;
+    const contentCX = (minX + maxX) / 2;
+    const contentCY = (minY + maxY) / 2;
+    const dx = targetCX - contentCX;
+    const dy = targetCY - contentCY;
+    state.blocks.forEach(b => {
+      b.x += dx;
+      b.y += dy;
+      const el = document.getElementById(b.id);
+      if (el) { el.style.left = b.x + 'px'; el.style.top = b.y + 'px'; }
+    });
+    renderConnections();
+  }
+
+  // ─── Share by URL ─────────────────────────────────────────────────────────
+
+  function shareAsURL() {
+    const data = serialize();
+    const json = JSON.stringify(data);
+    const encoded = btoa(unescape(encodeURIComponent(json)));
+    const url = window.location.origin + window.location.pathname + '#pipeline=' + encoded;
+    return url;
+  }
+
+  function loadFromURL() {
+    const hash = window.location.hash;
+    if (!hash.startsWith('#pipeline=')) return false;
+    const encoded = hash.slice('#pipeline='.length);
+    try {
+      const json = decodeURIComponent(escape(atob(encoded)));
+      const data = JSON.parse(json);
+      deserialize(data);
+      return true;
+    } catch (e) {
+      console.warn('Could not load pipeline from URL:', e);
+      return false;
+    }
+  }
+
   // ─── Utility ──────────────────────────────────────────────────────────────
 
+  function saveToHistory() {
+    if (_skipHistory) return;
+    const snap = JSON.stringify(serialize());
+    history = history.slice(0, historyIndex + 1);
+    history.push(snap);
+    if (history.length > MAX_HISTORY) history.shift();
+    else historyIndex++;
+  }
+
+  function _restoreSnapshot(data) {
+    // Remove all current block DOM elements
+    state.blocks.forEach(b => {
+      const el = document.getElementById(b.id);
+      if (el) el.remove();
+    });
+    state.blocks = [];
+    state.connections = [];
+    state.blockResults = {};
+    state.selectedBlock = null;
+    // Clear SVG connections
+    const paths = state.svg.querySelectorAll('.connection-path, .connection-hit');
+    paths.forEach(p => p.remove());
+    // Rebuild from data
+    if (data.blocks) {
+      for (const b of data.blocks) {
+        const def = BlockRegistry.getBlockType(b.type);
+        if (!def) continue;
+        const block = { id: b.id, type: b.type, x: b.x, y: b.y, config: b.config, _def: def };
+        state.blocks.push(block);
+        renderBlock(block);
+      }
+    }
+    if (data.connections) {
+      state.connections = data.connections;
+      renderConnections();
+    }
+  }
+
+  function undo() {
+    if (historyIndex <= 0) return false;
+    historyIndex--;
+    _skipHistory = true;
+    const snap = JSON.parse(history[historyIndex]);
+    _restoreSnapshot(snap);
+    _skipHistory = false;
+    if (state.onPipelineChange) state.onPipelineChange();
+    return true;
+  }
+
+  function redo() {
+    if (historyIndex >= history.length - 1) return false;
+    historyIndex++;
+    _skipHistory = true;
+    const snap = JSON.parse(history[historyIndex]);
+    _restoreSnapshot(snap);
+    _skipHistory = false;
+    if (state.onPipelineChange) state.onPipelineChange();
+    return true;
+  }
+
   function notifyChange() {
+    saveToHistory();
     if (state.onPipelineChange) {
       state.onPipelineChange(serialize());
     }
@@ -915,6 +1363,8 @@ const PipelineEditor = (() => {
     addConnection,
     removeConnection,
     run,
+    runInference,
+    updateModelBadge,
     clear,
     serialize,
     deserialize,
@@ -924,7 +1374,12 @@ const PipelineEditor = (() => {
     getResults,
     getState,
     renderConnections,
-    selectBlock
+    selectBlock,
+    undo,
+    redo,
+    fitToScreen,
+    shareAsURL,
+    loadFromURL
   };
 
 })();

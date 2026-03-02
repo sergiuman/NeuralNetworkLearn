@@ -479,7 +479,8 @@ runTests('BlockRegistry', function() {
 
   console.log('=== Block Registry Tests ===');
 
-  var expectedTypes = ['dataSource', 'windowing', 'fftBlock', 'statistics', 'featureMerger', 'neuralNetwork', 'fuzzyClassifier', 'output'];
+  var expectedTypes = ['dataSource', 'windowing', 'fftBlock', 'statistics', 'featureMerger', 'neuralNetwork', 'fuzzyClassifier', 'output',
+                       'filter', 'spectrogramBlock', 'rectifier', 'envelope', 'noiseAdder', 'knnClassifier'];
 
   for (var i = 0; i < expectedTypes.length; i++) {
     var typeName = expectedTypes[i];

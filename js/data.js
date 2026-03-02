@@ -585,6 +585,36 @@ const DataIO = (() => {
         name: 'Classification Demo',
         description: `${classes.length} classes, ${samplesPerClass} samples each, window=${windowSize}`
       };
+    },
+
+    whiteNoise: function(config) {
+      const { samples = 256, amplitude = 1, sampleRate = 256 } = config || {};
+      const values = DSP.generateWhiteNoise({ samples, amplitude, sampleRate }).values;
+      return { values, sampleRate, labels: values.map((_, i) => String(i)), name: 'White Noise' };
+    },
+
+    pinkNoise: function(config) {
+      const { samples = 256, amplitude = 1, sampleRate = 256 } = config || {};
+      const values = DSP.generatePinkNoise({ samples, amplitude, sampleRate }).values;
+      return { values, sampleRate, labels: values.map((_, i) => String(i)), name: 'Pink Noise' };
+    },
+
+    sawtooth: function(config) {
+      const { samples = 256, frequency = 10, sampleRate = 256, amplitude = 1, noise = 0 } = config || {};
+      const values = DSP.generateSawtooth({ samples, frequency, sampleRate, amplitude, noise }).values;
+      return { values, sampleRate, labels: values.map((_, i) => String(i)), name: 'Sawtooth Wave' };
+    },
+
+    impulse: function(config) {
+      const { samples = 256, position = 0.1, amplitude = 1, sampleRate = 256 } = config || {};
+      const values = DSP.generateImpulse({ samples, position, amplitude, sampleRate }).values;
+      return { values, sampleRate, labels: values.map((_, i) => String(i)), name: 'Impulse' };
+    },
+
+    stepFunction: function(config) {
+      const { samples = 256, position = 0.5, amplitude = 1, sampleRate = 256 } = config || {};
+      const values = DSP.generateStepFunction({ samples, position, amplitude, sampleRate }).values;
+      return { values, sampleRate, labels: values.map((_, i) => String(i)), name: 'Step Function' };
     }
   };
 

@@ -1081,3 +1081,648 @@ html, body {
 ::selection {
   background: rgba(79, 195, 247, 0.3);
 }
+
+/* ─── Tooltips ──────────────────────────────────────────────────────────── */
+
+#sf-tooltip {
+  position: fixed;
+  z-index: 9999;
+  pointer-events: none;
+  max-width: 270px;
+  min-width: 180px;
+  background: #1a1a30;
+  border: 1px solid #3a3a58;
+  border-radius: var(--radius);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04);
+  padding: 10px 13px;
+  opacity: 0;
+  transform: translateY(5px) scale(0.98);
+  transition: opacity 0.13s ease, transform 0.13s ease;
+}
+
+#sf-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.tt-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+  flex-wrap: wrap;
+}
+
+.tt-badge {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: rgba(79,195,247,0.12);
+  color: var(--accent-blue);
+  border: 1px solid rgba(79,195,247,0.25);
+  flex-shrink: 0;
+}
+
+.tt-badge.tt-out {
+  background: rgba(76,175,80,0.12);
+  color: #66BB6A;
+  border-color: rgba(76,175,80,0.25);
+}
+
+.tt-badge.tt-opt {
+  background: rgba(255,152,0,0.10);
+  color: var(--accent-orange);
+  border-color: rgba(255,152,0,0.25);
+}
+
+.tt-badge.tt-conn {
+  background: rgba(233,30,99,0.12);
+  color: #F06292;
+  border-color: rgba(233,30,99,0.25);
+}
+
+.tt-body {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+}
+
+.tt-type {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+}
+
+.tt-hint {
+  font-size: 10px;
+  color: #EF5350;
+  margin-top: 5px;
+  font-style: italic;
+}
+
+/* ─── Learn Panel ───────────────────────────────────────────────────────── */
+
+.learn-panel {
+  width: 300px;
+  min-width: 300px;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.2s ease, min-width 0.2s ease;
+  flex-shrink: 0;
+}
+
+.learn-panel.hidden {
+  width: 0;
+  min-width: 0;
+  border-left: none;
+}
+
+.learn-panel-header {
+  height: var(--toolbar-height);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.learn-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.learn-panel-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition), background var(--transition);
+}
+
+.learn-panel-close:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.learn-panel-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+
+/* Learn Card */
+
+.learn-card {
+  padding: 0;
+}
+
+.learn-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.learn-card-color-bar {
+  width: 4px;
+  height: 36px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.learn-card-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+.learn-card-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.learn-card-category {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+.learn-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.learn-section:last-child {
+  border-bottom: none;
+}
+
+.learn-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.learn-section-body {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.learn-uses-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.learn-uses-list li {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 0 2px 12px;
+  position: relative;
+  line-height: 1.5;
+}
+
+.learn-uses-list li::before {
+  content: '→';
+  position: absolute;
+  left: 0;
+  color: var(--accent-blue);
+  font-size: 10px;
+  top: 3px;
+}
+
+.learn-try-box {
+  background: rgba(79, 195, 247, 0.06);
+  border: 1px solid rgba(79, 195, 247, 0.15);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  font-style: italic;
+}
+
+/* Math collapsible */
+
+.learn-math-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-blue);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  transition: background var(--transition);
+}
+
+.learn-math-toggle:hover {
+  background: var(--bg-hover);
+}
+
+.learn-math-toggle .math-arrow {
+  transition: transform 0.2s ease;
+  font-size: 10px;
+}
+
+.learn-math-toggle.open .math-arrow {
+  transform: rotate(90deg);
+}
+
+.learn-math-body {
+  display: none;
+  padding: 12px 16px;
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-color);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.learn-math-body.open {
+  display: block;
+}
+
+/* "What just happened?" summary */
+
+.learn-summary {
+  padding: 16px;
+}
+
+.learn-summary-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--accent-green);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.learn-summary-body {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  background: rgba(76, 175, 80, 0.05);
+  border: 1px solid rgba(76, 175, 80, 0.15);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.learn-summary-steps {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.learn-summary-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.learn-summary-step-num {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-blue);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.learn-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.learn-empty-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+  display: block;
+}
+
+/* ─── Block Search Palette ──────────────────────────────────────────────── */
+
+#block-search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8000;
+  background: rgba(0, 0, 0, 0.5);
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+}
+
+#block-search-overlay.visible {
+  display: flex;
+}
+
+.block-search-palette {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg), 0 0 0 1px rgba(255,255,255,0.05);
+  width: 480px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.block-search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.block-search-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-size: 16px;
+}
+
+#block-search-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: 16px;
+  color: var(--text-primary);
+  font-family: var(--font-main);
+}
+
+#block-search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.block-search-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.block-search-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.block-search-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.block-search-result:hover,
+.block-search-result.selected {
+  background: var(--bg-hover);
+}
+
+.block-search-result-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.block-search-result-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.block-search-result-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.block-search-result-cat {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.block-search-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.block-search-footer {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  gap: 16px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.block-search-footer kbd {
+  background: var(--bg-input);
+  border: 1px solid var(--border-light);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+/* ─── Port Validation Highlights ────────────────────────────────────────── */
+
+.port-compatible .port-dot {
+  background: rgba(76, 175, 80, 0.3) !important;
+  border-color: #66BB6A !important;
+  box-shadow: 0 0 10px rgba(76, 175, 80, 0.5) !important;
+  transform: scale(1.4) !important;
+}
+
+.port-incompatible {
+  opacity: 0.3;
+}
+
+.port-incompatible .port-dot {
+  border-color: var(--accent-red) !important;
+}
+
+/* ─── Toolbar additions ──────────────────────────────────────────────────── */
+
+#btn-share {
+  /* styled as standard btn */
+}
+
+#btn-learn-toggle {
+  /* already styled as btn */
+}
+
+/* ─── Learn panel toggle button in toolbar ───────────────────────────────── */
+
+.toolbar-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ─── Undo/Redo button styles (if added to toolbar) ────────────────────── */
+
+#btn-undo,
+#btn-redo {
+  min-width: 32px;
+  padding: 0 8px;
+}
+
+#btn-undo:disabled,
+#btn-redo:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ─── Infer button ───────────────────────────────────────────────────────── */
+
+#btn-infer {
+  background: #00796B;
+  color: #fff;
+  border-color: #00796B;
+}
+
+#btn-infer:hover {
+  background: #00695C;
+  border-color: #00695C;
+}
+
+#btn-infer.running {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* ─── Block model badge ──────────────────────────────────────────────────── */
+
+.block-model-badge {
+  position: absolute;
+  bottom: 4px;
+  right: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  pointer-events: none;
+  letter-spacing: 0.02em;
+}
+
+.block-model-badge.trained {
+  color: #66BB6A;
+}
+
+.block-model-badge.no-model {
+  color: #FF7043;
+}
+
+/* ─── Block context menu ─────────────────────────────────────────────────── */
+
+.block-context-menu {
+  position: fixed;
+  z-index: 9000;
+  background: var(--bg-panel, #1e2130);
+  border: 1px solid var(--border-color, #2a2d3e);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  min-width: 190px;
+  padding: 4px 0;
+  display: none;
+}
+
+.block-context-menu.visible {
+  display: block;
+}
+
+.ctx-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text-primary, #e0e0e0);
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.ctx-item:hover {
+  background: rgba(255,255,255,0.07);
+}
+
+.ctx-separator {
+  height: 1px;
+  background: var(--border-color, #2a2d3e);
+  margin: 4px 0;
+}
+
+/* Learn panel: hidden by default, shown when JS adds .visible */
+.learn-panel:not(.visible) {
+  width: 0 !important;
+  min-width: 0 !important;
+  border-left: none !important;
+  overflow: hidden !important;
+}

@@ -14,7 +14,8 @@ const App = (() => {
     PipelineEditor.init('pipeline-canvas', {
       onBlockSelect: onBlockSelected,
       onPipelineChange: onPipelineChanged,
-      onRunComplete: onRunComplete
+      onRunComplete: onRunComplete,
+      onBlockContextMenu: showBlockContextMenu
     });
 
     // Setup sidebar
@@ -26,13 +27,26 @@ const App = (() => {
     // Setup config panel
     setupConfigPanel();
 
-    // Load from localStorage if available
-    const saved = localStorage.getItem('signalflow-pipeline');
-    if (saved) {
-      try {
-        PipelineEditor.deserialize(JSON.parse(saved));
-      } catch (e) {
-        console.warn('Could not restore saved pipeline:', e);
+    // Setup block search palette
+    setupBlockSearch();
+
+    // Init Learn panel
+    if (typeof LearnPanel !== 'undefined') {
+      LearnPanel.init('learn-panel');
+    }
+
+    // Try URL-based pipeline first, then localStorage
+    const loadedFromURL = PipelineEditor.loadFromURL();
+    if (loadedFromURL) {
+      hideWelcome();
+    } else {
+      const saved = localStorage.getItem('signalflow-pipeline');
+      if (saved) {
+        try {
+          PipelineEditor.deserialize(JSON.parse(saved));
+        } catch (e) {
+          console.warn('Could not restore saved pipeline:', e);
+        }
       }
     }
 
@@ -105,7 +119,11 @@ const App = (() => {
 
   function setupToolbar() {
     document.getElementById('btn-run')?.addEventListener('click', () => {
-      runPipeline();
+      runWithMode('train');
+    });
+
+    document.getElementById('btn-infer')?.addEventListener('click', () => {
+      runWithMode('infer');
     });
 
     document.getElementById('btn-clear')?.addEventListener('click', () => {
@@ -128,7 +146,26 @@ const App = (() => {
       exportResults();
     });
 
-    // Template buttons
+    // Undo / Redo
+    document.getElementById('btn-undo')?.addEventListener('click', () => {
+      PipelineEditor.undo();
+    });
+    document.getElementById('btn-redo')?.addEventListener('click', () => {
+      PipelineEditor.redo();
+    });
+
+    // Share by URL
+    document.getElementById('btn-share')?.addEventListener('click', shareByURL);
+
+    // Learn panel toggle
+    document.getElementById('btn-learn-toggle')?.addEventListener('click', toggleLearnPanel);
+
+    // Block search palette
+    document.getElementById('btn-search')?.addEventListener('click', () => {
+      openBlockSearch();
+    });
+
+    // Template buttons (original 3)
     document.getElementById('btn-template-fft')?.addEventListener('click', () => {
       loadTemplate('fft-analysis');
     });
@@ -139,10 +176,140 @@ const App = (() => {
       loadTemplate('stock-analysis');
     });
 
+    // Template buttons (new)
+    document.getElementById('btn-template-heart')?.addEventListener('click', () => {
+      loadTemplate('heart-rate-monitor');
+    });
+    document.getElementById('btn-template-noise')?.addEventListener('click', () => {
+      loadTemplate('noise-cancellation');
+    });
+    document.getElementById('btn-template-emg')?.addEventListener('click', () => {
+      loadTemplate('emg-envelope');
+    });
+    document.getElementById('btn-template-vibration')?.addEventListener('click', () => {
+      loadTemplate('vibration-analysis');
+    });
+    document.getElementById('btn-template-spectrogram')?.addEventListener('click', () => {
+      loadTemplate('spectrogram-demo');
+    });
+
     // Toggle panels
     document.getElementById('btn-toggle-output')?.addEventListener('click', () => {
       document.getElementById('output-panel')?.classList.toggle('collapsed');
     });
+  }
+
+  // ─── Block Search Palette ─────────────────────────────────────────────────
+
+  let _openBlockSearch = null;
+
+  function setupBlockSearch() {
+    const overlay = document.getElementById('block-search-overlay');
+    if (!overlay) return;
+
+    const input = document.getElementById('block-search-input');
+    const resultsList = document.getElementById('block-search-results');
+    if (!input || !resultsList) return;
+
+    // Gather all block types once
+    const allBlocks = [];
+    for (const cat of BlockRegistry.getCategories()) {
+      for (const b of BlockRegistry.getByCategory(cat.id)) {
+        allBlocks.push(b);
+      }
+    }
+
+    function addBlockToCenter(type) {
+      const canvas = document.getElementById('pipeline-canvas');
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = canvas.scrollLeft + rect.width / 2 - 90;
+      const y = canvas.scrollTop + rect.height / 2 - 40;
+      PipelineEditor.addBlock(type, x, y);
+      hideWelcome();
+    }
+
+    function getActiveItem() {
+      return resultsList.querySelector('.block-search-result.selected');
+    }
+
+    function setActive(el) {
+      resultsList.querySelectorAll('.block-search-result').forEach(i => i.classList.remove('selected'));
+      if (el) { el.classList.add('selected'); el.scrollIntoView({ block: 'nearest' }); }
+    }
+
+    function renderResults(query) {
+      const q = query.toLowerCase().trim();
+      const matches = q
+        ? allBlocks.filter(b =>
+            b.name.toLowerCase().includes(q) ||
+            (b.description || '').toLowerCase().includes(q) ||
+            b.category.toLowerCase().includes(q))
+        : allBlocks;
+      resultsList.innerHTML = '';
+      for (const b of matches.slice(0, 20)) {
+        const item = document.createElement('div');
+        item.className = 'block-search-result';
+        item.dataset.type = b.type;
+        item.innerHTML = `<span class="block-search-result-icon" style="background:${b.color}">${b.icon}</span><span class="block-search-result-name">${b.name}</span>`;
+        item.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          addBlockToCenter(b.type);
+          closeSearch();
+        });
+        resultsList.appendChild(item);
+      }
+      setActive(resultsList.querySelector('.block-search-result'));
+    }
+
+    function openSearch() {
+      overlay.classList.add('visible');
+      input.value = '';
+      renderResults('');
+      input.focus();
+    }
+
+    function closeSearch() {
+      overlay.classList.remove('visible');
+    }
+
+    input.addEventListener('input', () => renderResults(input.value));
+
+    input.addEventListener('keydown', (e) => {
+      const items = [...resultsList.querySelectorAll('.block-search-result')];
+      const idx = items.indexOf(getActiveItem());
+      if (e.key === 'Escape') { closeSearch(); return; }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const active = getActiveItem();
+        if (active) {
+          addBlockToCenter(active.dataset.type);
+          closeSearch();
+        }
+        return;
+      }
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(items[Math.min(idx + 1, items.length - 1)]); }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setActive(items[Math.max(idx - 1, 0)]); }
+    });
+
+    overlay.addEventListener('mousedown', (e) => {
+      if (e.target === overlay) closeSearch();
+    });
+
+    // '/' key anywhere on the page (not in inputs)
+    document.addEventListener('keydown', (e) => {
+      const tag = document.activeElement.tagName;
+      if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+        e.preventDefault();
+        openSearch();
+      }
+    });
+
+    _openBlockSearch = openSearch;
+  }
+
+  function openBlockSearch() {
+    if (_openBlockSearch) _openBlockSearch();
   }
 
   // ─── Config Panel ─────────────────────────────────────────────────────────
@@ -155,8 +322,10 @@ const App = (() => {
     currentBlock = block;
     if (block) {
       showConfigPanel(block);
+      if (typeof LearnPanel !== 'undefined') LearnPanel.showCard(block.type);
     } else {
       hideConfigPanel();
+      if (typeof LearnPanel !== 'undefined') LearnPanel.hide();
     }
   }
 
@@ -396,39 +565,124 @@ const App = (() => {
   // ─── Pipeline Execution ───────────────────────────────────────────────────
 
   function runPipeline() {
-    const runBtn = document.getElementById('btn-run');
-    if (runBtn) {
-      runBtn.classList.add('running');
-      runBtn.disabled = true;
+    runWithMode('train');
+  }
+
+  function runPipelineInfer() {
+    runWithMode('infer');
+  }
+
+  function runWithMode(mode) {
+    const isInfer = mode === 'infer';
+    const btnId = isInfer ? 'btn-infer' : 'btn-run';
+    const activeBtn = document.getElementById(btnId);
+    if (activeBtn) {
+      activeBtn.classList.add('running');
+      activeBtn.disabled = true;
     }
 
-    showNotification('Running pipeline...', 'info');
+    const label = isInfer ? 'Running inference...' : 'Training pipeline...';
+    showNotification(label, 'info');
 
     // Use setTimeout to allow UI to update
     setTimeout(() => {
       try {
-        const result = PipelineEditor.run();
+        const result = PipelineEditor.run(mode);
 
         if (result.errors.length > 0) {
           showNotification(`Completed with ${result.errors.length} error(s)`, 'warning');
         } else {
-          showNotification('Pipeline executed successfully', 'success');
+          showNotification(isInfer ? 'Inference complete' : 'Training complete', 'success');
         }
       } catch (err) {
         showNotification(`Error: ${err.message}`, 'error');
       } finally {
-        if (runBtn) {
-          runBtn.classList.remove('running');
-          runBtn.disabled = false;
+        if (activeBtn) {
+          activeBtn.classList.remove('running');
+          activeBtn.disabled = false;
         }
       }
     }, 50);
+  }
+
+  // ─── Block Context Menu ────────────────────────────────────────────────────
+
+  function showBlockContextMenu(block, x, y) {
+    hideBlockContextMenu();
+
+    const menu = document.getElementById('block-context-menu');
+    if (!menu) return;
+
+    const def = block._def || (typeof BlockRegistry !== 'undefined' && BlockRegistry.getBlockType(block.type));
+    const isClassifier = def && def.category === 'classifier';
+
+    menu.innerHTML = '';
+
+    if (isClassifier) {
+      addContextMenuItem(menu, '▶ Train Pipeline', () => runWithMode('train'));
+      addContextMenuItem(menu, '⚡ Run Inference', () => runWithMode('infer'));
+      addContextMenuSeparator(menu);
+      addContextMenuItem(menu, '🔄 Reset Model', () => {
+        block.config.trainedNetwork = null;
+        block.config._trainData = null;
+        block.config._isTrained = false;
+        block.config.forceRetrain = true;
+        PipelineEditor.updateModelBadge(block.id, false, 'train');
+        showNotification('Model reset — click Train to retrain', 'info');
+      });
+      addContextMenuSeparator(menu);
+    }
+
+    addContextMenuItem(menu, '⚙️ Settings', () => {
+      PipelineEditor.selectBlock(block.id);
+    });
+    addContextMenuItem(menu, '🗑️ Delete', () => {
+      PipelineEditor.removeBlock(block.id);
+    });
+
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    menu.classList.add('visible');
+
+    // Close on next click anywhere
+    setTimeout(() => {
+      document.addEventListener('click', hideBlockContextMenu, { once: true });
+      document.addEventListener('contextmenu', hideBlockContextMenu, { once: true });
+    }, 0);
+  }
+
+  function hideBlockContextMenu() {
+    const menu = document.getElementById('block-context-menu');
+    if (menu) menu.classList.remove('visible');
+  }
+
+  function addContextMenuItem(menu, label, onClick) {
+    const item = document.createElement('div');
+    item.className = 'ctx-item';
+    item.textContent = label;
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      hideBlockContextMenu();
+      onClick();
+    });
+    menu.appendChild(item);
+  }
+
+  function addContextMenuSeparator(menu) {
+    const sep = document.createElement('div');
+    sep.className = 'ctx-separator';
+    menu.appendChild(sep);
   }
 
   function onRunComplete(result) {
     // Update output panels
     clearOutputPanels();
     displayResults(result);
+
+    // Show "What just happened?" in Learn panel
+    if (typeof LearnPanel !== 'undefined') {
+      LearnPanel.showSummary(result);
+    }
 
     // Auto-save
     savePipelineToLocal();
@@ -689,6 +943,34 @@ const App = (() => {
     }, 3000);
   }
 
+  // ─── Share by URL ─────────────────────────────────────────────────────────
+
+  function shareByURL() {
+    const url = PipelineEditor.shareAsURL();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(() => {
+        showNotification('Share link copied to clipboard!', 'success');
+      }).catch(() => {
+        prompt('Copy this share link:', url);
+      });
+    } else {
+      prompt('Copy this share link:', url);
+    }
+  }
+
+  // ─── Learn Panel Toggle ───────────────────────────────────────────────────
+
+  function toggleLearnPanel() {
+    if (typeof LearnPanel === 'undefined') return;
+    if (LearnPanel.isVisible()) {
+      LearnPanel.hide();
+    } else if (currentBlock) {
+      LearnPanel.showCard(currentBlock.type);
+    } else {
+      LearnPanel.showCard('dataSource');
+    }
+  }
+
   // ─── Pipeline Change Handler ──────────────────────────────────────────────
 
   function onPipelineChanged(data) {
@@ -716,8 +998,12 @@ const App = (() => {
   return {
     init,
     runPipeline,
+    runPipelineInfer,
     loadTemplate,
-    showNotification
+    showNotification,
+    openBlockSearch,
+    shareByURL,
+    toggleLearnPanel
   };
 
 })();

@@ -15,12 +15,13 @@ const BlockRegistry = (() => {
       category: 'input',
       icon: '📁',
       color: '#4CAF50',
+      description: 'Your pipeline starting point. Generate synthetic signals (sine wave, ECG, EEG, EMG, stock prices, vibration, audio...) or load real data from a CSV or Excel file.',
       inputs: [],
-      outputs: [{ name: 'signal', type: 'timeseries', label: 'Signal' }],
+      outputs: [{ name: 'signal', type: 'timeseries', label: 'Signal', description: 'Time-series signal — amplitude values sampled at a fixed rate. Connect this to Windowing, FFT, or Statistics.' }],
       defaultConfig: {
         source: 'generate',      // 'generate', 'csv', 'manual'
         generator: 'sineWave',
-        generatorConfig: { samples: 256, frequency: 10, sampleRate: 256, amplitude: 1, noise: 0 },
+        generatorConfig: { samples: 256, frequency: 10, sampleRate: 256, amplitude: 1, noise: 0, position: 0.5 },
         csvData: null,
         csvColumn: null,
         sampleRate: 256,
@@ -30,7 +31,8 @@ const BlockRegistry = (() => {
         { key: 'source', label: 'Source', type: 'select', options: [
           { value: 'generate', label: 'Generate Sample Data' },
           { value: 'csv', label: 'Upload CSV/Excel' },
-          { value: 'manual', label: 'Enter Data Manually' }
+          { value: 'manual', label: 'Enter Data Manually' },
+          { value: 'microphone', label: 'Live Microphone' }
         ]},
         { key: 'generator', label: 'Generator', type: 'select', showIf: { source: 'generate' }, options: [
           { value: 'sineWave', label: 'Sine Wave' },
@@ -43,7 +45,12 @@ const BlockRegistry = (() => {
           { value: 'vibration', label: 'Mechanical Vibration' },
           { value: 'emg', label: 'EMG (Hand Muscle)' },
           { value: 'audioSignal', label: 'Audio Signal' },
-          { value: 'randomWalk', label: 'Random Walk' }
+          { value: 'randomWalk', label: 'Random Walk' },
+          { value: 'whiteNoise', label: 'White Noise' },
+          { value: 'pinkNoise', label: 'Pink Noise' },
+          { value: 'sawtooth', label: 'Sawtooth Wave' },
+          { value: 'impulse', label: 'Impulse' },
+          { value: 'stepFunction', label: 'Step Function' }
         ]},
         { key: 'generatorConfig.samples', label: 'Number of Samples', type: 'number', min: 8, max: 8192, step: 1, showIf: { source: 'generate' } },
         { key: 'generatorConfig.frequency', label: 'Frequency (Hz)', type: 'number', min: 0.1, max: 1000, step: 0.1, showIf: { source: 'generate' } },
@@ -83,6 +90,16 @@ const BlockRegistry = (() => {
             labels: values.map((_, i) => String(i)),
             name: 'Manual Data'
           };
+        } else if (config.source === 'microphone') {
+          // MicrophoneInput.getLatestBuffer() returns Float32Array or null
+          const buf = (typeof MicrophoneInput !== 'undefined' && MicrophoneInput.getLatestBuffer && MicrophoneInput.getLatestBuffer());
+          const values = buf ? Array.from(buf) : [];
+          result = {
+            values: values.length > 0 ? values : [0],
+            sampleRate: (typeof MicrophoneInput !== 'undefined' && MicrophoneInput.getSampleRate) ? MicrophoneInput.getSampleRate() : 44100,
+            labels: values.map((_, i) => String(i)),
+            name: 'Microphone'
+          };
         } else {
           result = { values: [], sampleRate: config.sampleRate, labels: [], name: 'Empty' };
         }
@@ -98,8 +115,9 @@ const BlockRegistry = (() => {
       category: 'preprocessing',
       icon: '🪟',
       color: '#2196F3',
-      inputs: [{ name: 'signal', type: 'timeseries', label: 'Signal' }],
-      outputs: [{ name: 'segments', type: 'segments', label: 'Segments' }],
+      description: 'Splits a continuous signal into short overlapping time frames and applies a window function to reduce spectral leakage. Use this before FFT for best results.',
+      inputs: [{ name: 'signal', type: 'timeseries', label: 'Signal', description: 'Raw time-series signal to divide into fixed-size windows. Connect from a Data Source block.' }],
+      outputs: [{ name: 'segments', type: 'segments', label: 'Segments', description: 'Array of overlapping time windows. Each window is a short slice of the signal, ready for FFT or Statistics.' }],
       defaultConfig: {
         windowSize: 32,
         overlap: 0.5,
@@ -151,13 +169,14 @@ const BlockRegistry = (() => {
       category: 'transform',
       icon: '📊',
       color: '#9C27B0',
+      description: 'Transforms a time-domain signal into the frequency domain using the Fast Fourier Transform (FFT). Reveals which frequencies are present and how strong they are.',
       inputs: [
-        { name: 'signal', type: 'timeseries', label: 'Signal', optional: true },
-        { name: 'segments', type: 'segments', label: 'Segments', optional: true }
+        { name: 'signal', type: 'timeseries', label: 'Signal', optional: true, description: 'Raw time-series signal. The block applies a window function internally before computing the FFT.' },
+        { name: 'segments', type: 'segments', label: 'Segments', optional: true, description: 'Pre-windowed signal segments from a Windowing block. FFT is computed on every window separately.' }
       ],
       outputs: [
-        { name: 'spectrum', type: 'spectrum', label: 'Spectrum' },
-        { name: 'features', type: 'features', label: 'Features' }
+        { name: 'spectrum', type: 'spectrum', label: 'Spectrum', description: 'Frequency spectrum showing amplitude (or power/phase) at each frequency bin — ideal for visualization.' },
+        { name: 'features', type: 'features', label: 'Features', description: 'FFT coefficients packed as compact feature vectors — ideal input for a Neural Network or Fuzzy Classifier.' }
       ],
       defaultConfig: {
         numCoefficients: 10,
@@ -291,13 +310,14 @@ const BlockRegistry = (() => {
       category: 'transform',
       icon: '📈',
       color: '#FF9800',
+      description: 'Computes time-domain statistical metrics from a signal: RMS, mean, variance, standard deviation, peak, crest factor, zero crossings, and energy. Great for feature extraction.',
       inputs: [
-        { name: 'signal', type: 'timeseries', label: 'Signal', optional: true },
-        { name: 'segments', type: 'segments', label: 'Segments', optional: true }
+        { name: 'signal', type: 'timeseries', label: 'Signal', optional: true, description: 'Raw time-series signal to compute statistics on (RMS, mean, variance, peak, zero crossings...).' },
+        { name: 'segments', type: 'segments', label: 'Segments', optional: true, description: 'Windowed signal segments — statistics are computed per window then averaged across all windows.' }
       ],
       outputs: [
-        { name: 'features', type: 'features', label: 'Features' },
-        { name: 'stats', type: 'stats', label: 'Statistics' }
+        { name: 'features', type: 'features', label: 'Features', description: 'Selected statistical values packed as feature vectors — ready for a Neural Network or Fuzzy Classifier.' },
+        { name: 'stats', type: 'stats', label: 'Statistics', description: 'Named statistics dictionary (e.g. RMS: 0.7, Mean: 0.0) — great for the Output visualization block.' }
       ],
       defaultConfig: {
         includeRMS: true,
@@ -388,11 +408,12 @@ const BlockRegistry = (() => {
       category: 'transform',
       icon: '🔗',
       color: '#607D8B',
+      description: 'Combines feature vectors from two upstream blocks into one wider vector. Use this to merge FFT coefficients with statistical features before feeding into a classifier.',
       inputs: [
-        { name: 'features1', type: 'features', label: 'Features A' },
-        { name: 'features2', type: 'features', label: 'Features B' }
+        { name: 'features1', type: 'features', label: 'Features A', description: 'First feature set to combine (e.g. FFT coefficients from the FFT block).' },
+        { name: 'features2', type: 'features', label: 'Features B', description: 'Second feature set to combine (e.g. statistical metrics from the Statistics block).' }
       ],
-      outputs: [{ name: 'features', type: 'features', label: 'Merged' }],
+      outputs: [{ name: 'features', type: 'features', label: 'Merged', description: 'Combined feature vectors — both input sets concatenated side by side per sample. Feed this into Neural Network or Fuzzy Classifier.' }],
       defaultConfig: {},
       configUI: [],
       process(config, inputs) {
@@ -426,10 +447,11 @@ const BlockRegistry = (() => {
       category: 'classifier',
       icon: '🧠',
       color: '#E91E63',
-      inputs: [{ name: 'features', type: 'features', label: 'Features' }],
+      description: 'A trainable feed-forward neural network. Auto-trains on your feature data using k-means clustering to generate labels. Classifies new samples in real time after training.',
+      inputs: [{ name: 'features', type: 'features', label: 'Features', description: 'Feature vectors to train on and classify. Each row is one sample. Auto-generates training labels via k-means clustering.' }],
       outputs: [
-        { name: 'predictions', type: 'predictions', label: 'Output' },
-        { name: 'features', type: 'features', label: 'Features' }
+        { name: 'predictions', type: 'predictions', label: 'Output', description: 'Classification results — class name and confidence score for every input sample.' },
+        { name: 'features', type: 'features', label: 'Features', description: 'Raw output probabilities as feature vectors — useful for chaining into a Fuzzy Classifier.' }
       ],
       defaultConfig: {
         hiddenLayers: [{ neurons: 16, activation: 'relu' }, { neurons: 8, activation: 'relu' }],
@@ -458,6 +480,7 @@ const BlockRegistry = (() => {
         { key: 'classNames', label: 'Class Names (comma-separated)', type: 'text' }
       ],
       process(config, inputs) {
+        const runMode = config._runMode || 'train';
         const features = inputs.features;
         if (!features || !features.vectors || features.vectors.length === 0) {
           return { predictions: null, features: null };
@@ -477,22 +500,38 @@ const BlockRegistry = (() => {
           { neurons: config.outputNeurons, activation: config.outputActivation }
         ];
 
-        // Create or reuse network
         let network = config.trainedNetwork;
-        if (!network || network.config.inputSize !== inputSize) {
-          network = NeuralNetwork.createNetwork({
-            inputSize,
-            layers,
-            learningRate: config.learningRate,
-            momentum: config.momentum
-          });
+        const hasSavedModel = network && network.config && network.config.inputSize === inputSize;
 
-          // Auto-training: generate targets from feature clustering
-          if (features.vectors.length >= config.outputNeurons * 2) {
-            const targets = autoGenerateTargets(features.vectors, config.outputNeurons);
-            NeuralNetwork.train(network, features.vectors, targets, config.epochs, config.batchSize);
+        if (runMode === 'infer') {
+          if (!hasSavedModel) {
+            config._isTrained = false;
+            return {
+              predictions: { error: 'No trained model — run Train first.', items: [], classNames },
+              features: null
+            };
           }
-          config.trainedNetwork = network;
+          // Use saved model as-is
+          config._isTrained = true;
+        } else {
+          // train mode: retrain if no model or forceRetrain flag
+          if (!hasSavedModel || config.forceRetrain) {
+            network = NeuralNetwork.createNetwork({
+              inputSize,
+              layers,
+              learningRate: config.learningRate,
+              momentum: config.momentum
+            });
+
+            // Auto-training: generate targets from feature clustering
+            if (features.vectors.length >= config.outputNeurons * 2) {
+              const targets = autoGenerateTargets(features.vectors, config.outputNeurons);
+              NeuralNetwork.train(network, features.vectors, targets, config.epochs, config.batchSize);
+            }
+            config.trainedNetwork = network;
+            config.forceRetrain = false;
+          }
+          config._isTrained = true;
         }
 
         // Predict
@@ -534,11 +573,12 @@ const BlockRegistry = (() => {
       category: 'classifier',
       icon: '🌫️',
       color: '#795548',
+      description: 'Applies fuzzy logic rules to classify values into named categories. Gives soft, human-readable decisions (Low / Medium / High) with membership degrees and confidence scores.',
       inputs: [
-        { name: 'features', type: 'features', label: 'Features' },
-        { name: 'predictions', type: 'predictions', label: 'NN Output', optional: true }
+        { name: 'features', type: 'features', label: 'Features', description: 'Feature vectors — uses the value at the configured feature index as the fuzzy input signal.' },
+        { name: 'predictions', type: 'predictions', label: 'NN Output', optional: true, description: 'Neural network output probabilities — uses class confidence values as fuzzy inputs instead of raw features.' }
       ],
-      outputs: [{ name: 'classification', type: 'classification', label: 'Classification' }],
+      outputs: [{ name: 'classification', type: 'classification', label: 'Classification', description: 'Fuzzy classification results — label, confidence score, and membership degrees for each input sample.' }],
       defaultConfig: {
         mode: 'threshold',  // 'threshold', 'custom'
         classes: ['Low', 'Medium', 'High'],
@@ -632,13 +672,14 @@ const BlockRegistry = (() => {
       category: 'output',
       icon: '📺',
       color: '#F44336',
+      description: 'Visualizes any data passing through the pipeline. Auto-detects the data type and renders the appropriate chart or table. Multiple ports can be connected simultaneously.',
       inputs: [
-        { name: 'signal', type: 'timeseries', label: 'Signal', optional: true },
-        { name: 'spectrum', type: 'spectrum', label: 'Spectrum', optional: true },
-        { name: 'features', type: 'features', label: 'Features', optional: true },
-        { name: 'predictions', type: 'predictions', label: 'Predictions', optional: true },
-        { name: 'classification', type: 'classification', label: 'Classification', optional: true },
-        { name: 'stats', type: 'stats', label: 'Statistics', optional: true }
+        { name: 'signal', type: 'timeseries', label: 'Signal', optional: true, description: 'Time-series signal — rendered as a line chart showing amplitude over time.' },
+        { name: 'spectrum', type: 'spectrum', label: 'Spectrum', optional: true, description: 'Frequency spectrum — rendered as a frequency domain bar or line chart.' },
+        { name: 'features', type: 'features', label: 'Features', optional: true, description: 'Feature vectors — rendered as a grouped bar chart of feature values per sample.' },
+        { name: 'predictions', type: 'predictions', label: 'Predictions', optional: true, description: 'Class predictions — rendered as a confidence chart showing class distribution.' },
+        { name: 'classification', type: 'classification', label: 'Classification', optional: true, description: 'Fuzzy classification results — rendered as a category count summary.' },
+        { name: 'stats', type: 'stats', label: 'Statistics', optional: true, description: 'Statistics dictionary — rendered as a bar chart of each named metric value.' }
       ],
       outputs: [],
       defaultConfig: {
@@ -662,6 +703,270 @@ const BlockRegistry = (() => {
       process(config, inputs) {
         // Output blocks don't transform data, they just pass through for visualization
         return { _display: { config, inputs } };
+      }
+    },
+
+    // ── Filter ───────────────────────────────────────────────────────────────
+
+    filter: {
+      name: 'Filter',
+      category: 'preprocessing',
+      icon: '🎚️',
+      color: '#00BCD4',
+      description: 'Removes unwanted frequencies using a Butterworth IIR filter. Lowpass keeps slow variations, highpass keeps fast changes, bandpass keeps a range, notch removes one frequency.',
+      inputs: [{ name: 'signal', type: 'timeseries', label: 'Signal', description: 'Time-series signal to filter.' }],
+      outputs: [
+        { name: 'signal', type: 'timeseries', label: 'Filtered', description: 'Filtered signal with unwanted frequencies removed.' },
+        { name: 'response', type: 'bodePlot', label: 'Bode Plot', description: 'Frequency response of the filter — shows which frequencies pass through.' }
+      ],
+      defaultConfig: {
+        filterType: 'lowpass',
+        cutoffFreq: 50,
+        order: 2
+      },
+      configUI: [
+        { key: 'filterType', label: 'Filter Type', type: 'select', options: [
+          { value: 'lowpass', label: 'Lowpass — keep slow changes' },
+          { value: 'highpass', label: 'Highpass — keep fast changes' },
+          { value: 'bandpass', label: 'Bandpass — keep a frequency range' },
+          { value: 'notch', label: 'Notch — remove one frequency (e.g. 60Hz)' }
+        ]},
+        { key: 'cutoffFreq', label: 'Cutoff Frequency (Hz)', type: 'number', min: 0.1, max: 10000, step: 0.1 },
+        { key: 'order', label: 'Filter Order', type: 'select', options: [
+          { value: 2, label: '2nd order (gentle slope)' },
+          { value: 4, label: '4th order (steeper slope)' }
+        ]}
+      ],
+      process(config, inputs) {
+        const signal = inputs.signal;
+        if (!signal || !signal.values || signal.values.length === 0) {
+          return { signal: null, response: null };
+        }
+        const filtered = DSP.butterworthFilter(signal.values, config.filterType, config.cutoffFreq, signal.sampleRate || 256, config.order || 2);
+        const response = DSP.filterFrequencyResponse(config.filterType, config.cutoffFreq, signal.sampleRate || 256, config.order || 2, 256);
+        return {
+          signal: { values: filtered, sampleRate: signal.sampleRate, labels: signal.labels, name: `${config.filterType} filtered` },
+          response: { ...response, _type: 'bodePlot', cutoff: config.cutoffFreq }
+        };
+      }
+    },
+
+    // ── Spectrogram ──────────────────────────────────────────────────────────
+
+    spectrogramBlock: {
+      name: 'Spectrogram',
+      category: 'transform',
+      icon: '🌈',
+      color: '#3F51B5',
+      description: 'Computes a time-frequency spectrogram — a 2D view showing how the frequency content of a signal changes over time. Essential for audio, EEG, and vibration analysis.',
+      inputs: [{ name: 'signal', type: 'timeseries', label: 'Signal', description: 'Time-series signal to compute spectrogram for.' }],
+      outputs: [{ name: 'spectrogram', type: 'spectrogram', label: 'Spectrogram', description: 'Time-frequency heatmap. Each column is an FFT of a short time window.' }],
+      defaultConfig: {
+        windowSize: 64,
+        hopSize: 16,
+        windowFunction: 'hanning'
+      },
+      configUI: [
+        { key: 'windowSize', label: 'Window Size (samples)', type: 'number', min: 8, max: 1024, step: 8 },
+        { key: 'hopSize', label: 'Hop Size (samples)', type: 'number', min: 1, max: 512, step: 1 },
+        { key: 'windowFunction', label: 'Window Function', type: 'select', options: [
+          { value: 'hanning', label: 'Hanning' },
+          { value: 'hamming', label: 'Hamming' },
+          { value: 'blackman', label: 'Blackman' },
+          { value: 'rectangular', label: 'Rectangular' }
+        ]}
+      ],
+      process(config, inputs) {
+        const signal = inputs.signal;
+        if (!signal || !signal.values || signal.values.length === 0) return { spectrogram: null };
+        const result = DSP.spectrogram(signal.values, config.windowSize, config.hopSize, config.windowFunction, signal.sampleRate || 256);
+        return { spectrogram: result };
+      }
+    },
+
+    // ── Rectifier ────────────────────────────────────────────────────────────
+
+    rectifier: {
+      name: 'Rectifier',
+      category: 'preprocessing',
+      icon: '⚡',
+      color: '#FF5722',
+      description: 'Converts a signal to all-positive values. Full-wave flips negative values; half-wave zeros them out. Essential first step for EMG envelope extraction.',
+      inputs: [{ name: 'signal', type: 'timeseries', label: 'Signal', description: 'Raw signal with positive and negative values.' }],
+      outputs: [{ name: 'signal', type: 'timeseries', label: 'Rectified', description: 'All-positive signal ready for envelope detection.' }],
+      defaultConfig: { mode: 'full' },
+      configUI: [
+        { key: 'mode', label: 'Rectification Mode', type: 'select', options: [
+          { value: 'full', label: 'Full-wave — flip negatives to positive' },
+          { value: 'half', label: 'Half-wave — zero out negatives' }
+        ]}
+      ],
+      process(config, inputs) {
+        const signal = inputs.signal;
+        if (!signal || !signal.values) return { signal: null };
+        const values = config.mode === 'half'
+          ? signal.values.map(v => Math.max(0, v))
+          : signal.values.map(v => Math.abs(v));
+        return { signal: { ...signal, values, name: `${config.mode}-wave rectified` } };
+      }
+    },
+
+    // ── Envelope ─────────────────────────────────────────────────────────────
+
+    envelope: {
+      name: 'Envelope',
+      category: 'preprocessing',
+      icon: '〰️',
+      color: '#8BC34A',
+      description: 'Extracts the amplitude envelope — the slow-moving outline of signal amplitude over time. Used to detect muscle activation from EMG or track audio loudness.',
+      inputs: [{ name: 'signal', type: 'timeseries', label: 'Signal', description: 'Rectified or raw signal to extract envelope from.' }],
+      outputs: [{ name: 'signal', type: 'timeseries', label: 'Envelope', description: 'Smooth amplitude envelope showing signal activation over time.' }],
+      defaultConfig: { windowSize: 20 },
+      configUI: [
+        { key: 'windowSize', label: 'Smoothing Window (samples)', type: 'number', min: 2, max: 500, step: 1 }
+      ],
+      process(config, inputs) {
+        const signal = inputs.signal;
+        if (!signal || !signal.values) return { signal: null };
+        const w = Math.max(2, config.windowSize || 20);
+        const vals = signal.values;
+        const env = new Array(vals.length);
+        for (let i = 0; i < vals.length; i++) {
+          const start = Math.max(0, i - w + 1);
+          let sum = 0;
+          for (let j = start; j <= i; j++) sum += vals[j] * vals[j];
+          env[i] = Math.sqrt(sum / (i - start + 1));
+        }
+        return { signal: { ...signal, values: env, name: 'Envelope' } };
+      }
+    },
+
+    // ── Noise Adder ──────────────────────────────────────────────────────────
+
+    noiseAdder: {
+      name: 'Noise Adder',
+      category: 'preprocessing',
+      icon: '〜',
+      color: '#9E9E9E',
+      description: 'Adds controlled noise to a clean signal. Great for teaching SNR concepts, testing filter robustness, or simulating real measurement conditions.',
+      inputs: [{ name: 'signal', type: 'timeseries', label: 'Signal', description: 'Clean signal to add noise to.' }],
+      outputs: [{ name: 'signal', type: 'timeseries', label: 'Noisy Signal', description: 'Signal with added noise at the configured level.' }],
+      defaultConfig: { noiseLevel: 0.1, noiseType: 'gaussian' },
+      configUI: [
+        { key: 'noiseLevel', label: 'Noise Level (amplitude)', type: 'number', min: 0, max: 5, step: 0.01 },
+        { key: 'noiseType', label: 'Noise Type', type: 'select', options: [
+          { value: 'gaussian', label: 'Gaussian (White Noise)' },
+          { value: 'pink', label: 'Pink Noise' },
+          { value: 'uniform', label: 'Uniform Random' }
+        ]}
+      ],
+      process(config, inputs) {
+        const signal = inputs.signal;
+        if (!signal || !signal.values) return { signal: null };
+        const n = signal.values.length;
+        let noise;
+        if (config.noiseType === 'pink') {
+          noise = DSP.generatePinkNoise({ samples: n, amplitude: config.noiseLevel }).values;
+        } else if (config.noiseType === 'uniform') {
+          noise = Array.from({ length: n }, () => (Math.random() * 2 - 1) * config.noiseLevel);
+        } else {
+          // Gaussian approximation via Box-Muller
+          noise = Array.from({ length: n }, () => {
+            const u1 = Math.random(), u2 = Math.random();
+            return Math.sqrt(-2 * Math.log(u1 + 1e-10)) * Math.cos(2 * Math.PI * u2) * config.noiseLevel;
+          });
+        }
+        const values = signal.values.map((v, i) => v + noise[i]);
+        return { signal: { ...signal, values, name: `${signal.name || 'Signal'} + noise` } };
+      }
+    },
+
+    // ── k-NN Classifier ──────────────────────────────────────────────────────
+
+    knnClassifier: {
+      name: 'k-NN Classifier',
+      category: 'classifier',
+      icon: '🎯',
+      color: '#009688',
+      description: 'k-Nearest Neighbors classifier. Finds the k most similar training samples and votes on the class. No training phase — intuitive and great for teaching classification concepts.',
+      inputs: [{ name: 'features', type: 'features', label: 'Features', description: 'Feature vectors to classify. The first 80% are used as training data.' }],
+      outputs: [{ name: 'predictions', type: 'predictions', label: 'Predictions', description: 'Classification results — class label and confidence for each sample.' }],
+      defaultConfig: {
+        k: 3,
+        classNames: ['Class A', 'Class B'],
+        numClasses: 2
+      },
+      configUI: [
+        { key: 'k', label: 'k (neighbors to vote)', type: 'number', min: 1, max: 20, step: 1 },
+        { key: 'numClasses', label: 'Number of Classes', type: 'number', min: 2, max: 10, step: 1 },
+        { key: 'classNames', label: 'Class Names (comma-separated)', type: 'text' }
+      ],
+      process(config, inputs) {
+        const runMode = config._runMode || 'train';
+        const features = inputs.features;
+        if (!features || !features.vectors || features.vectors.length < 2) return { predictions: null };
+
+        const classNames = typeof config.classNames === 'string'
+          ? config.classNames.split(',').map(s => s.trim())
+          : (config.classNames || ['Class A', 'Class B']);
+
+        const vectors = features.vectors;
+        const n = vectors.length;
+
+        let trainVectors, trainLabels;
+
+        if (runMode === 'infer') {
+          // Use stored training data to classify new incoming vectors
+          if (!config._trainData) {
+            config._isTrained = false;
+            return {
+              predictions: { error: 'No training data — run Train first.', items: [], classNames }
+            };
+          }
+          trainVectors = config._trainData.vectors;
+          trainLabels = config._trainData.labels;
+          config._isTrained = true;
+        } else {
+          // Train mode: auto-label and store training data
+          const trainSize = Math.max(1, Math.floor(n * 0.8));
+          const rms = vectors.map((v, i) => ({ i, rms: Math.sqrt(v.reduce((s, x) => s + x * x, 0) / v.length) }));
+          rms.sort((a, b) => a.rms - b.rms);
+          trainLabels = new Array(n).fill(0);
+          for (let j = 0; j < trainSize; j++) {
+            trainLabels[rms[j].i] = Math.floor(j / trainSize * config.numClasses);
+          }
+          trainVectors = vectors.slice(0, trainSize);
+          trainLabels = trainLabels.slice(0, trainSize);
+          // Persist for future infer runs
+          config._trainData = { vectors: [...trainVectors], labels: [...trainLabels] };
+          config._isTrained = true;
+        }
+
+        // kNN predict all incoming vectors against stored training data
+        const predictions = vectors.map((query) => {
+          const dists = [];
+          for (let ti = 0; ti < trainVectors.length; ti++) {
+            let d = 0;
+            for (let f = 0; f < query.length; f++) {
+              const diff = query[f] - trainVectors[ti][f];
+              d += diff * diff;
+            }
+            dists.push({ d: Math.sqrt(d), label: trainLabels[ti] });
+          }
+          dists.sort((a, b) => a.d - b.d);
+          const votes = new Array(config.numClasses).fill(0);
+          const k = Math.min(config.k, dists.length);
+          for (let j = 0; j < k; j++) votes[dists[j].label]++;
+          const classIndex = votes.indexOf(Math.max(...votes));
+          const confidence = votes[classIndex] / k;
+          const output = new Array(config.numClasses).fill(0);
+          output[classIndex] = confidence;
+          return { output, classIndex, className: classNames[classIndex] || `Class ${classIndex}`, confidence };
+        });
+
+        return {
+          predictions: { items: predictions, classNames }
+        };
       }
     }
   };

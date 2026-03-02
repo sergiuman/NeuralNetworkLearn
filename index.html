@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="manifest" href="manifest.json">
   <!-- SheetJS for Excel support -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 </head>
@@ -28,9 +29,13 @@
       </div>
 
       <div class="toolbar-group">
-        <button id="btn-run" class="btn btn-primary" title="Run pipeline (Ctrl+Enter)">
+        <button id="btn-run" class="btn btn-primary" data-run-mode="train" title="Train pipeline — classifiers will (re)train on data (Ctrl+Enter)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-          Run
+          Train
+        </button>
+        <button id="btn-infer" class="btn btn-infer" title="Run inference — classifiers use saved model, no retraining">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          Infer
         </button>
         <button id="btn-clear" class="btn btn-danger" title="Clear pipeline">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M5 6v14a2 2 0 002 2h10a2 2 0 002-2V6"/></svg>
@@ -41,10 +46,28 @@
       <div class="toolbar-separator"></div>
 
       <div class="toolbar-group">
+        <button id="btn-undo" class="btn" title="Undo (Cmd+Z)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h10a8 8 0 010 16H3"/><path d="M3 10L7 6M3 10l4 4"/></svg>
+          Undo
+        </button>
+        <button id="btn-redo" class="btn" title="Redo (Cmd+Y)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10H11a8 8 0 000 16h10"/><path d="M21 10l-4-4M21 10l-4 4"/></svg>
+          Redo
+        </button>
+      </div>
+
+      <div class="toolbar-separator"></div>
+
+      <div class="toolbar-group">
         <span class="toolbar-label">Templates:</span>
         <button id="btn-template-fft" class="btn" title="FFT Analysis template">FFT Analysis</button>
         <button id="btn-template-classify" class="btn" title="Signal Classification template">Classification</button>
         <button id="btn-template-stock" class="btn" title="Stock Analysis template">Stock Analysis</button>
+        <button id="btn-template-heart" class="btn" title="Heart Rate Monitor template">Heart Rate</button>
+        <button id="btn-template-noise" class="btn" title="Noise Cancellation template">Noise Filter</button>
+        <button id="btn-template-emg" class="btn" title="EMG Envelope template">EMG</button>
+        <button id="btn-template-vibration" class="btn" title="Vibration Analysis template">Vibration</button>
+        <button id="btn-template-spectrogram" class="btn" title="Spectrogram Demo template">Spectrogram</button>
       </div>
 
       <div class="toolbar-separator"></div>
@@ -61,6 +84,18 @@
         <button id="btn-export" class="btn" title="Export results as CSV">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h8M8 9h2"/></svg>
           Export CSV
+        </button>
+        <button id="btn-share" class="btn" title="Share pipeline via URL">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.59 13.51l6.83 3.98M15.41 6.51L8.59 10.49"/></svg>
+          Share
+        </button>
+        <button id="btn-search" class="btn" title="Search blocks (/)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          Search
+        </button>
+        <button id="btn-learn-toggle" class="btn" title="Toggle Learn panel">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 16v-4M12 8h.01"/></svg>
+          Learn
         </button>
       </div>
     </header>
@@ -96,12 +131,37 @@
                 <div class="template-card" onclick="App.loadTemplate('signal-classification')">
                   <span class="template-icon">🧠</span>
                   <div class="template-name">Signal Classification</div>
-                  <div class="template-desc">ECG signal windowing, feature extraction, NN & fuzzy classifier</div>
+                  <div class="template-desc">ECG signal windowing, feature extraction, NN &amp; fuzzy classifier</div>
                 </div>
                 <div class="template-card" onclick="App.loadTemplate('stock-analysis')">
                   <span class="template-icon">📈</span>
                   <div class="template-name">Stock Analysis</div>
                   <div class="template-desc">Financial time-series with statistical features and trading signals</div>
+                </div>
+                <div class="template-card" onclick="App.loadTemplate('heart-rate-monitor')">
+                  <span class="template-icon">❤️</span>
+                  <div class="template-name">Heart Rate Monitor</div>
+                  <div class="template-desc">ECG signal with FFT frequency analysis for heart rate detection</div>
+                </div>
+                <div class="template-card" onclick="App.loadTemplate('noise-cancellation')">
+                  <span class="template-icon">🔇</span>
+                  <div class="template-name">Noise Cancellation</div>
+                  <div class="template-desc">Add noise to a signal, then use a lowpass filter to remove it</div>
+                </div>
+                <div class="template-card" onclick="App.loadTemplate('emg-envelope')">
+                  <span class="template-icon">💪</span>
+                  <div class="template-name">EMG Envelope</div>
+                  <div class="template-desc">Muscle signal rectification and envelope extraction pipeline</div>
+                </div>
+                <div class="template-card" onclick="App.loadTemplate('vibration-analysis')">
+                  <span class="template-icon">⚙️</span>
+                  <div class="template-name">Vibration Analysis</div>
+                  <div class="template-desc">Industrial vibration FFT for fault detection and monitoring</div>
+                </div>
+                <div class="template-card" onclick="App.loadTemplate('spectrogram-demo')">
+                  <span class="template-icon">🌈</span>
+                  <div class="template-name">Spectrogram Demo</div>
+                  <div class="template-desc">Chirp signal time-frequency analysis using spectrogram block</div>
                 </div>
               </div>
               <button class="welcome-start-empty" onclick="document.getElementById('welcome-overlay').style.display='none'">
@@ -134,8 +194,29 @@
         <div id="config-content" class="config-body"></div>
       </aside>
 
+      <!-- Learn Panel -->
+      <aside id="learn-panel" class="learn-panel">
+        <div class="learn-panel-header">
+          <span>Learn</span>
+          <button class="learn-panel-close" onclick="if(typeof LearnPanel!=='undefined')LearnPanel.hide()">&times;</button>
+        </div>
+        <div class="learn-panel-content" id="learn-panel-content"></div>
+      </aside>
+
     </div>
   </div>
+
+  <!-- Block Search Overlay -->
+  <div id="block-search-overlay" class="block-search-overlay">
+    <div class="block-search-palette">
+      <input id="block-search-input" type="text" placeholder="Search blocks… (type or press /)">
+      <div id="block-search-results" class="block-search-results"></div>
+      <div class="block-search-footer"><kbd>↑↓</kbd> navigate &nbsp; <kbd>Enter</kbd> add &nbsp; <kbd>Esc</kbd> close</div>
+    </div>
+  </div>
+
+  <!-- Block Context Menu -->
+  <div id="block-context-menu" class="block-context-menu"></div>
 
   <!-- Notifications -->
   <div id="notifications" class="notifications"></div>
@@ -148,6 +229,8 @@
   <script src="js/blocks.js"></script>
   <script src="js/charts.js"></script>
   <script src="js/pipeline.js"></script>
+  <script src="js/microphone.js"></script>
+  <script src="js/learn.js"></script>
   <script src="js/main.js"></script>
 
   <!-- Keyboard shortcut: Ctrl+Enter to run -->

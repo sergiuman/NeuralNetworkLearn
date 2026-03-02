@@ -1,0 +1,16 @@
+{
+  "name": "SignalFlow Studio",
+  "short_name": "SignalFlow",
+  "description": "Visual signal processing pipeline builder for DSP, biomedical, audio, and AI analysis",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0f1117",
+  "theme_color": "#4FC3F7",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='24' fill='%230f1117'/><path d='M20 96 L50 70 L80 122 L110 50 L140 106 L172 82' stroke='%234FC3F7' stroke-width='8' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}
