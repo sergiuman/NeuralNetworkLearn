@@ -68,6 +68,26 @@ const BlockRegistry = (() => {
           const gen = DataIO.generators[config.generator];
           if (!gen) throw new Error(`Unknown generator: ${config.generator}`);
           result = gen(config.generatorConfig);
+          // Enrich signal with metadata
+          if (!result.label) {
+            const metaMap = {
+              stockMarket: { label: `${config.generatorConfig?.symbol || 'Stock'} Close Price`, units: 'USD' },
+              sineWave: { label: 'Sine Wave', units: 'Amplitude' },
+              ecg: { label: 'ECG Signal', units: 'mV' },
+              eeg: { label: 'EEG Signal', units: 'µV' },
+              emg: { label: 'EMG Signal', units: 'mV' },
+              vibration: { label: 'Vibration', units: 'g' },
+              audioSignal: { label: 'Audio', units: 'dB' },
+              chirp: { label: 'Chirp', units: 'Amplitude' },
+              randomWalk: { label: 'Random Walk', units: 'Value' },
+              whiteNoise: { label: 'White Noise', units: 'Amplitude' },
+              pinkNoise: { label: 'Pink Noise', units: 'Amplitude' }
+            };
+            const meta = metaMap[config.generator] || { label: config.generator || 'Signal', units: '' };
+            result.label = meta.label;
+            result.units = meta.units;
+            result.source = 'generated';
+          }
         } else if (config.source === 'csv' && config.csvData) {
           // Handle both raw CSV text and pre-parsed objects
           const parsed = typeof config.csvData === 'string'
@@ -463,7 +483,9 @@ const BlockRegistry = (() => {
         batchSize: 8,
         trainingMode: 'auto', // 'auto' uses first 80% for training
         classNames: ['Class A', 'Class B'],
-        trainedNetwork: null
+        trainedNetwork: null,
+        topology: 'feedforward',  // 'feedforward' | 'recurrent' | 'deep' | 'wide'
+        _contextVector: null      // recurrent state (output of previous run)
       },
       configUI: [
         { key: 'hiddenLayers', label: 'Hidden Layers', type: 'layers' },
@@ -477,7 +499,13 @@ const BlockRegistry = (() => {
         { key: 'momentum', label: 'Momentum', type: 'number', min: 0, max: 0.999, step: 0.01 },
         { key: 'epochs', label: 'Training Epochs', type: 'number', min: 1, max: 10000, step: 1 },
         { key: 'batchSize', label: 'Batch Size', type: 'number', min: 1, max: 256, step: 1 },
-        { key: 'classNames', label: 'Class Names (comma-separated)', type: 'text' }
+        { key: 'classNames', label: 'Class Names (comma-separated)', type: 'text' },
+        { key: 'topology', label: 'Network Topology', type: 'select', options: [
+          { value: 'feedforward', label: 'Feedforward — standard layer-by-layer (best for tabular features)' },
+          { value: 'recurrent', label: 'Recurrent (Jordan) — output feeds back as input (best for time series)' },
+          { value: 'deep', label: 'Deep — 4 hidden layers, good for complex patterns' },
+          { value: 'wide', label: 'Wide — 1 large hidden layer, fast and generalizes well' }
+        ]}
       ],
       process(config, inputs) {
         const runMode = config._runMode || 'train';
@@ -491,17 +519,41 @@ const BlockRegistry = (() => {
           ? config.classNames.split(',').map(s => s.trim())
           : config.classNames || [];
 
-        // Build layer config
-        const layers = [
-          ...config.hiddenLayers.map(l => ({
-            neurons: l.neurons,
-            activation: l.activation
-          })),
-          { neurons: config.outputNeurons, activation: config.outputActivation }
-        ];
+        // Apply topology preset
+        let layersCfg;
+        const topology = config.topology || 'feedforward';
+        if (topology === 'deep') {
+          layersCfg = [
+            { neurons: 32, activation: 'relu' },
+            { neurons: 16, activation: 'relu' },
+            { neurons: 8, activation: 'relu' },
+            { neurons: 4, activation: 'relu' },
+            { neurons: config.outputNeurons, activation: config.outputActivation }
+          ];
+        } else if (topology === 'wide') {
+          layersCfg = [
+            { neurons: 64, activation: 'relu' },
+            { neurons: config.outputNeurons, activation: config.outputActivation }
+          ];
+        } else {
+          // feedforward or recurrent: use configured hidden layers
+          layersCfg = [
+            ...config.hiddenLayers.map(l => ({ neurons: l.neurons, activation: l.activation })),
+            { neurons: config.outputNeurons, activation: config.outputActivation }
+          ];
+        }
+
+        // Recurrent: context vector (Jordan network — previous output fed back as extra input)
+        const isRecurrent = topology === 'recurrent';
+        if (isRecurrent && !config._contextVector) {
+          config._contextVector = new Array(config.outputNeurons).fill(0);
+        }
+        const effectiveInputSize = isRecurrent
+          ? inputSize + config.outputNeurons
+          : inputSize;
 
         let network = config.trainedNetwork;
-        const hasSavedModel = network && network.config && network.config.inputSize === inputSize;
+        const hasSavedModel = network && network.config && network.config.inputSize === effectiveInputSize;
 
         if (runMode === 'infer') {
           if (!hasSavedModel) {
@@ -511,22 +563,29 @@ const BlockRegistry = (() => {
               features: null
             };
           }
-          // Use saved model as-is
           config._isTrained = true;
         } else {
-          // train mode: retrain if no model or forceRetrain flag
           if (!hasSavedModel || config.forceRetrain) {
+            if (isRecurrent) config._contextVector = new Array(config.outputNeurons).fill(0);
             network = NeuralNetwork.createNetwork({
-              inputSize,
-              layers,
+              inputSize: effectiveInputSize,
+              layers: layersCfg,
               learningRate: config.learningRate,
               momentum: config.momentum
             });
-
-            // Auto-training: generate targets from feature clustering
             if (features.vectors.length >= config.outputNeurons * 2) {
-              const targets = autoGenerateTargets(features.vectors, config.outputNeurons);
-              NeuralNetwork.train(network, features.vectors, targets, config.epochs, config.batchSize);
+              // For recurrent mode: build sequential inputs with context
+              let trainVectors = features.vectors;
+              if (isRecurrent) {
+                let ctx = new Array(config.outputNeurons).fill(0);
+                trainVectors = features.vectors.map(v => {
+                  const augmented = [...v, ...ctx];
+                  // Context updates to zeros during training (simplified teacher forcing)
+                  return augmented;
+                });
+              }
+              const targets = autoGenerateTargets(trainVectors.map(v => v.slice(0, inputSize)), config.outputNeurons);
+              NeuralNetwork.train(network, trainVectors, targets, config.epochs, config.batchSize);
             }
             config.trainedNetwork = network;
             config.forceRetrain = false;
@@ -535,8 +594,14 @@ const BlockRegistry = (() => {
         }
 
         // Predict
-        const predictions = features.vectors.map(v => {
-          const result = NeuralNetwork.classify(network, v);
+        const ctx = isRecurrent ? (config._contextVector || new Array(config.outputNeurons).fill(0)) : null;
+        const predictions = features.vectors.map((v, idx) => {
+          const input = isRecurrent ? [...v, ...ctx] : v;
+          const result = NeuralNetwork.classify(network, input);
+          // Update context to last prediction (Jordan recurrent)
+          if (isRecurrent) {
+            config._contextVector = result.output;
+          }
           return {
             output: result.output,
             classIndex: result.classIndex,
@@ -967,6 +1032,139 @@ const BlockRegistry = (() => {
         return {
           predictions: { items: predictions, classNames }
         };
+      }
+    },
+
+    // ── Live Data Source ─────────────────────────────────────────────────────
+    liveDataSource: {
+      name: 'Live Data Source',
+      category: 'input',
+      icon: '📡',
+      color: '#FF6F00',
+      description: 'Connects to real-world live data feeds. Polls Yahoo Finance for stock/index prices, or runs a simulated feed. Automatically triggers pipeline inference on each new data tick.',
+      inputs: [],
+      outputs: [{ name: 'signal', type: 'timeseries', label: 'Live Signal', description: 'Real-time price/value timeseries. Carries metadata: label, units, symbol, last price, last update timestamp.' }],
+      defaultConfig: {
+        source: 'yahoo',      // 'yahoo' | 'simulate'
+        symbol: '^GSPC',      // Yahoo Finance symbol
+        interval: '1d',       // '1d' | '1h' | '5m' | '1m'
+        historyBars: 30,      // number of historical bars to fetch
+        autoInfer: true,      // trigger pipeline infer on each new tick
+        pollSeconds: 60,      // polling interval in seconds
+        _cachedSignal: null,  // populated by startFeed
+        _feedInterval: null,
+        _feedActive: false,
+        _lastUpdate: null,
+        _error: null,
+        _tickCount: 0
+      },
+      configUI: [
+        { key: 'source', label: 'Data Source', type: 'select', options: [
+          { value: 'yahoo', label: 'Yahoo Finance (live)' },
+          { value: 'simulate', label: 'Simulation (offline)' }
+        ]},
+        { key: 'symbol', label: 'Symbol (e.g. ^GSPC, SPY, AAPL)', type: 'text' },
+        { key: 'interval', label: 'Bar Interval', type: 'select', options: [
+          { value: '1d', label: 'Daily' },
+          { value: '1h', label: 'Hourly' },
+          { value: '5m', label: '5 Minutes' },
+          { value: '1m', label: '1 Minute' }
+        ]},
+        { key: 'historyBars', label: 'History Bars', type: 'number', min: 5, max: 200, step: 5 },
+        { key: 'pollSeconds', label: 'Poll Interval (seconds)', type: 'number', min: 10, max: 3600, step: 10 },
+        { key: 'autoInfer', label: 'Auto-infer on new data', type: 'checkbox' }
+      ],
+      // --- Lifecycle: called by pipeline.js, not process() ---
+      startFeed(config, onNewData) {
+        if (config._feedActive) return; // already running
+        config._feedActive = true;
+        config._error = null;
+
+        const doFetch = async () => {
+          try {
+            let signal;
+            if (config.source === 'yahoo') {
+              // Map historyBars to Yahoo range parameter
+              const intervalRangeMap = {
+                '1m': '1d', '5m': '5d', '1h': '60d', '1d': '6mo'
+              };
+              const range = intervalRangeMap[config.interval] || '6mo';
+              const raw = await DataIO.fetchYahooFinance(config.symbol, config.interval, range);
+              // Trim to historyBars
+              const n = Math.min(config.historyBars, raw.values.length);
+              signal = {
+                ...raw,
+                values: raw.values.slice(-n),
+                timestamps: (raw.timestamps || []).slice(-n)
+              };
+            } else {
+              // Simulate: geometric brownian motion
+              const gen = DataIO.generators.stockMarket({
+                samples: config.historyBars,
+                startPrice: (config._cachedSignal?.lastPrice || 4500),
+                volatility: 0.015,
+                drift: 0.0001,
+                trend: 'mixed'
+              });
+              signal = {
+                values: gen.values,
+                timestamps: Array.from({ length: gen.values.length }, (_, i) => Date.now()/1000 - (gen.values.length - i) * 86400),
+                sampleRate: 1,
+                label: `${config.symbol} (simulated)`,
+                units: 'USD',
+                source: 'Simulation',
+                symbol: config.symbol,
+                lastPrice: gen.values[gen.values.length - 1],
+                lastUpdate: Date.now()
+              };
+            }
+            config._cachedSignal = signal;
+            config._lastUpdate = Date.now();
+            config._tickCount = (config._tickCount || 0) + 1;
+            config._error = null;
+            if (onNewData) onNewData(signal);
+          } catch (err) {
+            config._error = err.message;
+            // On error in yahoo mode, fall back to simulation
+            if (config.source === 'yahoo') {
+              config.source = 'simulate'; // fallback silently
+            }
+          }
+        };
+
+        // First fetch immediately
+        doFetch();
+        // Then poll
+        config._feedInterval = setInterval(doFetch, (config.pollSeconds || 60) * 1000);
+      },
+      stopFeed(config) {
+        config._feedActive = false;
+        if (config._feedInterval) {
+          clearInterval(config._feedInterval);
+          config._feedInterval = null;
+        }
+      },
+      process(config, inputs) {
+        if (!config._cachedSignal) {
+          // Return a placeholder signal while waiting for first fetch
+          const placeholder = DataIO.generators.stockMarket({
+            samples: config.historyBars || 30,
+            startPrice: 4500, volatility: 0.015, drift: 0.0001, trend: 'mixed'
+          });
+          return {
+            signal: {
+              values: placeholder.values,
+              sampleRate: 1,
+              label: `${config.symbol} (waiting for live data…)`,
+              units: 'USD',
+              source: config.source === 'yahoo' ? 'Yahoo Finance' : 'Simulation',
+              symbol: config.symbol,
+              lastPrice: placeholder.values[placeholder.values.length - 1],
+              _isPlaceholder: true
+            }
+          };
+        }
+        return { signal: config._cachedSignal };
       }
     }
   };

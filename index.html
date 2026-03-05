@@ -68,6 +68,8 @@
         <button id="btn-template-emg" class="btn" title="EMG Envelope template">EMG</button>
         <button id="btn-template-vibration" class="btn" title="Vibration Analysis template">Vibration</button>
         <button id="btn-template-spectrogram" class="btn" title="Spectrogram Demo template">Spectrogram</button>
+        <button id="btn-template-live-sp500" class="btn btn-live-template" title="Live S&P 500 with real-time Yahoo Finance feed and trained NN predictions">📡 Live S&P 500</button>
+        <button id="btn-template-stock-train" class="btn" title="Stock trend prediction: simulate historical data, train NN, then switch to live infer">📈 Stock Train→Infer</button>
       </div>
 
       <div class="toolbar-separator"></div>
@@ -97,6 +99,20 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 16v-4M12 8h.01"/></svg>
           Learn
         </button>
+      </div>
+
+      <div class="toolbar-separator"></div>
+
+      <div class="toolbar-group">
+        <button id="btn-live" class="btn btn-live" title="Start live data feed (polls Yahoo Finance)">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
+          Start Live
+        </button>
+        <button id="btn-stop-live" class="btn btn-stop-live" title="Stop live data feed" style="display:none">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+          Stop Live
+        </button>
+        <span id="live-status-badge" class="live-status-badge">○ Offline</span>
       </div>
     </header>
 
@@ -162,6 +178,16 @@
                   <span class="template-icon">🌈</span>
                   <div class="template-name">Spectrogram Demo</div>
                   <div class="template-desc">Chirp signal time-frequency analysis using spectrogram block</div>
+                </div>
+                <div class="template-card" onclick="App.loadTemplate('live-sp500')">
+                  <span class="template-icon">📡</span>
+                  <div class="template-name">Live S&P 500</div>
+                  <div class="template-desc">Real-time Yahoo Finance feed → Recurrent NN → Buy/Hold/Sell predictions</div>
+                </div>
+                <div class="template-card" onclick="App.loadTemplate('stock-train-infer')">
+                  <span class="template-icon">📈</span>
+                  <div class="template-name">Stock Train → Infer</div>
+                  <div class="template-desc">Train on simulated historical data, then infer on live prices — the core Train/Infer workflow</div>
                 </div>
               </div>
               <button class="welcome-start-empty" onclick="document.getElementById('welcome-overlay').style.display='none'">
@@ -233,12 +259,21 @@
   <script src="js/learn.js"></script>
   <script src="js/main.js"></script>
 
-  <!-- Keyboard shortcut: Ctrl+Enter to run -->
+  <!-- Keyboard shortcuts: Ctrl+Enter=Train, Ctrl+Shift+Enter=Infer, Ctrl+L=toggle live feed -->
   <script>
     document.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'Enter') {
+        e.preventDefault();
+        App.runPipelineInfer();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
         App.runPipeline();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'l') {
+        e.preventDefault();
+        if (typeof App !== 'undefined') {
+          if (App.isLiveFeedActive && App.isLiveFeedActive()) App.stopLiveFeed();
+          else App.startLiveFeed();
+        }
       }
     });
   </script>

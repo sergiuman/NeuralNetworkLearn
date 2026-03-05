@@ -16,6 +16,21 @@ const Charts = (() => {
     return palette[index % palette.length];
   }
 
+  // ─── Axis Value Formatter ─────────────────────────────────────────────────
+
+  function formatAxisValue(v, units) {
+    if (units === 'USD' || units === 'EUR' || units === 'GBP') {
+      if (Math.abs(v) >= 1000) return '$' + v.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      if (Math.abs(v) >= 1) return '$' + v.toFixed(2);
+      return v.toPrecision(3);
+    }
+    if (Math.abs(v) === 0) return '0';
+    if (Math.abs(v) >= 10000) return (v/1000).toFixed(1) + 'k';
+    if (Math.abs(v) >= 100) return v.toFixed(0);
+    if (Math.abs(v) >= 1) return v.toFixed(2);
+    return v.toPrecision(3);
+  }
+
   // ─── Canvas Chart Renderer ────────────────────────────────────────────────
 
   function createChart(container, type, data, options) {
@@ -43,6 +58,18 @@ const Charts = (() => {
       animate: false,
       ...options
     };
+
+    // Pull label/units from signal metadata if not explicitly set
+    if (data && data.signal) {
+      if (!opts.title && data.signal.label) opts.title = data.signal.label;
+      if (!opts.yLabel && data.signal.units) opts.yLabel = data.signal.units;
+      if (!opts.xLabel) opts.xLabel = data.signal.sampleRate === 1 ? 'Bars' : 'Samples';
+    }
+    if (data && data.signal && data.signal.source) {
+      if (opts.title && !opts.title.includes('·')) {
+        opts.title = `${opts.title}  ·  ${data.signal.source}`;
+      }
+    }
 
     // Handle high-DPI displays
     const dpr = window.devicePixelRatio || 1;
@@ -97,6 +124,32 @@ const Charts = (() => {
     return canvas;
   }
 
+  // ─── Live Chart ───────────────────────────────────────────────────────────
+
+  function createLiveChart(container, signalHistory, options) {
+    const opts = {
+      title: 'Live Feed',
+      yLabel: 'Price (USD)',
+      xLabel: 'Time',
+      units: 'USD',
+      liveColor: '#FF6F00',
+      ...options
+    };
+    const data = {
+      datasets: [{
+        label: opts.title,
+        values: signalHistory.map(s => s.lastValue),
+        color: opts.liveColor
+      }],
+      signal: { label: opts.title, units: opts.units, source: 'Live', sampleRate: 1 }
+    };
+    return createChart(container, 'line', data, {
+      ...opts,
+      showLegend: false,
+      lineWidth: 2.5
+    });
+  }
+
   // ─── Line Chart ───────────────────────────────────────────────────────────
 
   function drawLineChart(ctx, data, opts, px, py, pw, ph) {
@@ -124,7 +177,7 @@ const Charts = (() => {
     const N = datasets[0].values.length;
 
     // Draw grid
-    if (opts.showGrid) drawGrid(ctx, px, py, pw, ph, yMin, yMax, N, labels);
+    if (opts.showGrid) drawGrid(ctx, px, py, pw, ph, yMin, yMax, N, labels, opts);
 
     // Draw each dataset
     for (let d = 0; d < datasets.length; d++) {
@@ -179,7 +232,7 @@ const Charts = (() => {
     }
     if (yMax === yMin) yMax = yMin + 1;
 
-    if (opts.showGrid) drawGrid(ctx, px, py, pw, ph, yMin, yMax, N, labels);
+    if (opts.showGrid) drawGrid(ctx, px, py, pw, ph, yMin, yMax, N, labels, opts);
 
     const barGroupWidth = pw / N;
     const barWidth = (barGroupWidth * 0.8) / datasets.length;
@@ -223,7 +276,7 @@ const Charts = (() => {
     if (yMin === yMax) { yMin -= 1; yMax += 1; }
 
     const N = datasets[0].values.length;
-    if (opts.showGrid) drawGrid(ctx, px, py, pw, ph, yMin, yMax, N, labels);
+    if (opts.showGrid) drawGrid(ctx, px, py, pw, ph, yMin, yMax, N, labels, opts);
 
     for (let d = 0; d < datasets.length; d++) {
       const ds = datasets[d];
@@ -243,11 +296,13 @@ const Charts = (() => {
 
   // ─── Grid Drawing ─────────────────────────────────────────────────────────
 
-  function drawGrid(ctx, px, py, pw, ph, yMin, yMax, N, labels) {
+  function drawGrid(ctx, px, py, pw, ph, yMin, yMax, N, labels, opts) {
     ctx.strokeStyle = '#333348';
     ctx.lineWidth = 1;
     ctx.fillStyle = '#888';
     ctx.font = '10px Inter, system-ui, monospace';
+
+    const _units = opts ? (opts.units || opts.yLabel) : undefined;
 
     // Y-axis grid lines
     const yTicks = 5;
@@ -259,7 +314,7 @@ const Charts = (() => {
       ctx.lineTo(px + pw, y);
       ctx.stroke();
       ctx.textAlign = 'right';
-      ctx.fillText(formatNumber(val), px - 5, y + 3);
+      ctx.fillText(formatAxisValue(val, _units), px - 5, y + 3);
     }
 
     // X-axis ticks
@@ -1259,6 +1314,8 @@ const Charts = (() => {
 
   return {
     createChart,
+    createLiveChart,
+    formatAxisValue,
     visualizeSignal,
     visualizeSpectrum,
     visualizeFeatures,

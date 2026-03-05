@@ -6,6 +6,8 @@ const App = (() => {
 
   let currentBlock = null;
   let outputPanels = [];
+  let liveActive = false;
+  let liveStatusInterval = null;
 
   // ─── Initialization ───────────────────────────────────────────────────────
 
@@ -15,7 +17,8 @@ const App = (() => {
       onBlockSelect: onBlockSelected,
       onPipelineChange: onPipelineChanged,
       onRunComplete: onRunComplete,
-      onBlockContextMenu: showBlockContextMenu
+      onBlockContextMenu: showBlockContextMenu,
+      onLiveData: onLiveDataArrived
     });
 
     // Setup sidebar
@@ -192,6 +195,15 @@ const App = (() => {
     document.getElementById('btn-template-spectrogram')?.addEventListener('click', () => {
       loadTemplate('spectrogram-demo');
     });
+
+    document.getElementById('btn-template-live-sp500')?.addEventListener('click', () => {
+      loadTemplate('live-sp500');
+    });
+    document.getElementById('btn-template-stock-train')?.addEventListener('click', () => {
+      loadTemplate('stock-train-infer');
+    });
+
+    setupLiveFeed();
 
     // Toggle panels
     document.getElementById('btn-toggle-output')?.addEventListener('click', () => {
@@ -605,6 +617,39 @@ const App = (() => {
     }, 50);
   }
 
+  // ─── Live Feed ────────────────────────────────────────────────────────────
+
+  function setupLiveFeed() {
+    document.getElementById('btn-live')?.addEventListener('click', () => {
+      startLiveFeed();
+    });
+    document.getElementById('btn-stop-live')?.addEventListener('click', () => {
+      stopLiveFeed();
+    });
+  }
+
+  function startLiveFeed() {
+    if (liveActive) return;
+    liveActive = true;
+    const badge = document.getElementById('live-status-badge');
+    if (badge) { badge.textContent = '◌ Connecting…'; badge.classList.add('active'); }
+    const stopBtn = document.getElementById('btn-stop-live');
+    if (stopBtn) stopBtn.style.display = 'inline-flex';
+    showNotification('Starting live feed…', 'info');
+    PipelineEditor.startLiveFeeds();
+  }
+
+  function stopLiveFeed() {
+    if (!liveActive) return;
+    liveActive = false;
+    PipelineEditor.stopLiveFeeds();
+    const badge = document.getElementById('live-status-badge');
+    if (badge) { badge.textContent = '○ Offline'; badge.classList.remove('active'); }
+    const stopBtn = document.getElementById('btn-stop-live');
+    if (stopBtn) stopBtn.style.display = 'none';
+    showNotification('Live feed stopped', 'info');
+  }
+
   // ─── Block Context Menu ────────────────────────────────────────────────────
 
   function showBlockContextMenu(block, x, y) {
@@ -630,6 +675,12 @@ const App = (() => {
         PipelineEditor.updateModelBadge(block.id, false, 'train');
         showNotification('Model reset — click Train to retrain', 'info');
       });
+      addContextMenuSeparator(menu);
+    }
+
+    if (def && def.type === 'liveDataSource' || block.type === 'liveDataSource') {
+      addContextMenuItem(menu, '📡 Start Live Feed', () => startLiveFeed());
+      addContextMenuItem(menu, '⏹ Stop Live Feed', () => stopLiveFeed());
       addContextMenuSeparator(menu);
     }
 
@@ -672,6 +723,18 @@ const App = (() => {
     const sep = document.createElement('div');
     sep.className = 'ctx-separator';
     menu.appendChild(sep);
+  }
+
+  function onLiveDataArrived(blockId, signal) {
+    // Update live status badge in toolbar
+    const badge = document.getElementById('live-status-badge');
+    if (badge) {
+      badge.textContent = `● LIVE  ${signal.symbol || ''}  ${signal.lastPrice ? ('$' + Number(signal.lastPrice).toFixed(2)) : ''}`;
+      badge.title = `Last update: ${new Date().toLocaleTimeString()}  ·  Tick #${signal._tickCount || '?'}`;
+      badge.classList.add('active');
+    }
+    const stopBtn = document.getElementById('btn-stop-live');
+    if (stopBtn) stopBtn.style.display = 'inline-flex';
   }
 
   function onRunComplete(result) {
@@ -1003,7 +1066,10 @@ const App = (() => {
     showNotification,
     openBlockSearch,
     shareByURL,
-    toggleLearnPanel
+    toggleLearnPanel,
+    startLiveFeed,
+    stopLiveFeed,
+    isLiveFeedActive: () => liveActive
   };
 
 })();

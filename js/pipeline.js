@@ -21,7 +21,10 @@ const PipelineEditor = (() => {
     onBlockSelect: null,
     onPipelineChange: null,
     onRunComplete: null,
-    onBlockContextMenu: null
+    onBlockContextMenu: null,
+    liveBlocks: {},       // { blockId: true } for blocks with active feeds
+    onLiveData: null,     // callback(blockId, signal) when live data arrives
+    _autoRunDebounce: null
   };
 
   const MAX_HISTORY = 50;
@@ -45,6 +48,7 @@ const PipelineEditor = (() => {
     state.onPipelineChange = options?.onPipelineChange;
     state.onRunComplete = options?.onRunComplete;
     state.onBlockContextMenu = options?.onBlockContextMenu;
+    state.onLiveData = options?.onLiveData;
 
     // Create SVG layer for connections
     state.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -908,6 +912,49 @@ const PipelineEditor = (() => {
     return run('infer');
   }
 
+  // ─── Live Feed Management ─────────────────────────────────────────────────
+
+  function startLiveFeeds() {
+    for (const block of state.blocks) {
+      const def = block._def || BlockRegistry.getBlockType(block.type);
+      if (def && typeof def.startFeed === 'function' && !state.liveBlocks[block.id]) {
+        state.liveBlocks[block.id] = true;
+        def.startFeed(block.config, (signal) => {
+          // New data arrived: update badge, trigger auto-infer if configured
+          const badge = document.getElementById(`${block.id}-model-badge`);
+          if (badge) {
+            badge.className = 'block-model-badge trained';
+            badge.textContent = `📡 Live · Tick #${block.config._tickCount || 1}`;
+            badge.title = `Last update: ${new Date().toLocaleTimeString()}`;
+          }
+          if (state.onLiveData) state.onLiveData(block.id, signal);
+          if (block.config.autoInfer !== false) {
+            // Debounced auto-infer
+            clearTimeout(state._autoRunDebounce);
+            state._autoRunDebounce = setTimeout(() => run('infer'), 200);
+          }
+        });
+      }
+    }
+  }
+
+  function stopLiveFeeds() {
+    for (const blockId of Object.keys(state.liveBlocks)) {
+      const block = getBlock(blockId);
+      if (!block) continue;
+      const def = block._def || BlockRegistry.getBlockType(block.type);
+      if (def && typeof def.stopFeed === 'function') {
+        def.stopFeed(block.config);
+      }
+    }
+    state.liveBlocks = {};
+    clearTimeout(state._autoRunDebounce);
+  }
+
+  function isLive() {
+    return Object.keys(state.liveBlocks).length > 0;
+  }
+
   function setBlockStatus(blockId, status, message) {
     const el = document.getElementById(`${blockId}-status`);
     if (!el) return;
@@ -1208,6 +1255,70 @@ const PipelineEditor = (() => {
           { fromBlock: 'b1', fromPort: 0, toBlock: 'b3', toPort: 0 },
           { fromBlock: 'b2', fromPort: 0, toBlock: 'b4', toPort: 0 }
         ]
+      },
+      'live-sp500': {
+        blocks: [
+          { id: 'ls1', type: 'liveDataSource', x: 50, y: 120, config: {
+              source: 'yahoo', symbol: '^GSPC', interval: '1d', historyBars: 30,
+              autoInfer: true, pollSeconds: 60
+          }},
+          { id: 'ls2', type: 'windowing', x: 290, y: 100, config: {
+              windowSize: 10, overlap: 0.5, windowFunction: 'rectangular', applyWindow: false
+          }},
+          { id: 'ls3', type: 'statistics', x: 530, y: 100, config: {
+              includeRMS: true, includeMean: true, includeVariance: true, includeStdDev: true,
+              includePeak: false, includeCrestFactor: false, includeZeroCrossings: false, includeEnergy: false
+          }},
+          { id: 'ls4', type: 'neuralNetwork', x: 770, y: 100, config: {
+              hiddenLayers: [{ neurons: 16, activation: 'relu' }, { neurons: 8, activation: 'relu' }],
+              outputNeurons: 3, outputActivation: 'softmax',
+              learningRate: 0.01, momentum: 0.9, epochs: 100, batchSize: 8,
+              classNames: 'Bullish,Neutral,Bearish',
+              topology: 'recurrent',
+              trainedNetwork: null
+          }},
+          { id: 'ls5', type: 'output', x: 50, y: 350, config: { title: 'S&P 500 Live Price', chartType: 'auto' }},
+          { id: 'ls6', type: 'output', x: 1010, y: 100, config: { title: 'Trend Prediction', chartType: 'auto' }}
+        ],
+        connections: [
+          { fromBlock: 'ls1', fromPort: 0, toBlock: 'ls2', toPort: 0 },
+          { fromBlock: 'ls1', fromPort: 0, toBlock: 'ls5', toPort: 0 },
+          { fromBlock: 'ls2', fromPort: 0, toBlock: 'ls3', toPort: 1 },
+          { fromBlock: 'ls3', fromPort: 0, toBlock: 'ls4', toPort: 0 },
+          { fromBlock: 'ls4', fromPort: 0, toBlock: 'ls6', toPort: 4 }
+        ]
+      },
+      'stock-train-infer': {
+        blocks: [
+          { id: 'st1', type: 'dataSource', x: 50, y: 120, config: {
+              source: 'generate', generator: 'stockMarket', sampleRate: 1,
+              generatorConfig: { samples: 300, startPrice: 4000, volatility: 0.018, drift: 0.0002, trend: 'bull' }
+          }},
+          { id: 'st2', type: 'windowing', x: 290, y: 100, config: {
+              windowSize: 20, overlap: 0.75, windowFunction: 'rectangular', applyWindow: false
+          }},
+          { id: 'st3', type: 'statistics', x: 530, y: 100, config: {
+              includeRMS: true, includeMean: true, includeVariance: true, includeStdDev: true,
+              includePeak: true, includeCrestFactor: false, includeZeroCrossings: false, includeEnergy: false
+          }},
+          { id: 'st4', type: 'neuralNetwork', x: 770, y: 100, config: {
+              hiddenLayers: [{ neurons: 24, activation: 'relu' }, { neurons: 12, activation: 'relu' }],
+              outputNeurons: 3, outputActivation: 'softmax',
+              learningRate: 0.01, momentum: 0.9, epochs: 150, batchSize: 8,
+              classNames: 'Buy,Hold,Sell',
+              topology: 'recurrent',
+              trainedNetwork: null
+          }},
+          { id: 'st5', type: 'output', x: 50, y: 350, config: { title: 'Training Data (Simulated S&P 500)', chartType: 'auto' }},
+          { id: 'st6', type: 'output', x: 1010, y: 100, config: { title: 'Buy / Hold / Sell Signals', chartType: 'auto' }}
+        ],
+        connections: [
+          { fromBlock: 'st1', fromPort: 0, toBlock: 'st2', toPort: 0 },
+          { fromBlock: 'st1', fromPort: 0, toBlock: 'st5', toPort: 0 },
+          { fromBlock: 'st2', fromPort: 0, toBlock: 'st3', toPort: 1 },
+          { fromBlock: 'st3', fromPort: 0, toBlock: 'st4', toPort: 0 },
+          { fromBlock: 'st4', fromPort: 0, toBlock: 'st6', toPort: 4 }
+        ]
       }
     };
   }
@@ -1364,6 +1475,9 @@ const PipelineEditor = (() => {
     removeConnection,
     run,
     runInference,
+    startLiveFeeds,
+    stopLiveFeeds,
+    isLive,
     updateModelBadge,
     clear,
     serialize,

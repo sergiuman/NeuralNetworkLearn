@@ -271,6 +271,48 @@ const LearnPanel = (() => {
         body: 'E[n] = √(mean(x[n-W:n]²))<br>where W = window size (smoothing factor)<br>Alternatively: Hilbert transform gives instantaneous envelope:<br>E[n] = |x[n] + j·H{x[n]}|',
       },
     },
+
+    liveDataSource: {
+      icon: '📡',
+      name: 'Live Data Source',
+      color: '#1565C0',
+      plain:
+        'Connects to real-world data in real time — stock prices, sensors, or simulated feeds. Polls Yahoo Finance (or a built-in simulator) every N seconds and feeds fresh data into the pipeline. When new data arrives, it can automatically re-run the pipeline in Infer mode so your trained model makes predictions on the latest values.',
+      intuition:
+        'Polling means asking a server "any new data?" on a schedule. Each polling cycle that returns new data is called a tick. A symbol is the identifier for a financial instrument — for example, ^GSPC is the S&P 500 index, which tracks 500 large US companies. Auto-infer runs the pipeline without retraining, using the model you already trained.',
+      uses: [
+        'Live S&P 500 price monitoring and prediction',
+        'Real-time sensor dashboards (IoT, industrial)',
+        'Algorithmic trading signal generation',
+        'Continuous anomaly detection on streaming data',
+      ],
+      try: 'Load the Live S&P 500 template. Click Train to train the Neural Network on simulated historical data, then click Start Live to fetch real prices and watch Buy/Hold/Sell predictions update automatically on each new tick.',
+      math: {
+        title: 'Polling & Tick Rate',
+        body: 'poll_interval = N seconds (configurable)<br>On each tick: fetch latest price → append to signal buffer → run pipeline in Infer mode<br>^GSPC daily close is a clean time series: one data point per trading day (~252 per year)',
+      },
+    },
+
+    neuralNetworkTopology: {
+      icon: '🧠',
+      name: 'NN Topology — How neurons connect',
+      color: '#AD1457',
+      plain:
+        'The arrangement of layers and connections in a neural network determines what patterns it can learn. SignalFlow offers four topologies: Feedforward (standard one-direction flow), Recurrent/Jordan (output fed back as input for short-term memory), Deep (4 hidden layers for abstract feature detection), and Wide (1 very wide layer for many simple patterns in parallel).',
+      intuition:
+        'Think of topology like the floor plan of an office. A feedforward network is a straight hallway — data walks from one end to the other. A recurrent (Jordan) network has a feedback loop — the last room\'s output is passed back to the first room as extra context for the next visitor. Deep networks have many floors; wide networks have one very large floor.',
+      uses: [
+        'Feedforward: static feature classification (statistics, FFT features)',
+        'Recurrent/Jordan: time series prediction where context matters (stock prices, ECG)',
+        'Deep: complex pattern recognition when simple topologies underfit',
+        'Wide: fast training with good generalisation, a strong first choice',
+      ],
+      try: 'In the Neural Network config, switch Topology from Feedforward to Jordan. Run Train mode on a stock price pipeline — the Jordan network remembers its previous prediction and uses it as an extra input, which can improve sequential accuracy.',
+      math: {
+        title: 'Jordan Recurrent Connection',
+        body: 'At time t: input_t = [features_t, output_{t-1}]<br>In Train mode: recurrent state resets to zero at start of each run<br>In Infer mode: recurrent state carries over between pipeline runs<br>This gives the network continuous memory across live data ticks',
+      },
+    },
   };
 
   // -------------------------------------------------------------------------
@@ -487,6 +529,16 @@ const LearnPanel = (() => {
           classifierDesc = `The kNN classifier${k ? ` (k=${k})` : ''} voted on the nearest neighbors to assign a class`;
         }
         if (classifierDesc) parts.push(classifierDesc);
+      }
+
+      // Mention live data blocks
+      try {
+        const liveBlocks = blocks.filter((b) => b.type === 'liveDataSource');
+        if (liveBlocks.length > 0) {
+          parts.push('📡 Live data block active — pipeline will auto-infer on each new tick');
+        }
+      } catch (e) {
+        // Ignore if block list is unavailable
       }
 
       // Join with punctuation

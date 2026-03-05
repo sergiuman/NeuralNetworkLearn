@@ -635,6 +635,72 @@ const DataIO = (() => {
     return (parsed.columns[columnName] || []).map(v => Number(v));
   }
 
+  // ─── Yahoo Finance Integration ────────────────────────────────────────────
+
+  function parseYahooFinanceResponse(json) {
+    const result = json && json.chart && json.chart.result && json.chart.result[0];
+    if (!result) throw new Error('Invalid Yahoo Finance response structure');
+
+    const meta = result.meta || {};
+    const symbol = meta.symbol || 'UNKNOWN';
+    const currency = meta.currency || 'USD';
+    const timestamps = result.timestamp || [];
+    const quote = result.indicators && result.indicators.quote && result.indicators.quote[0];
+    const rawClose = (quote && quote.close) || [];
+
+    // Filter out NaN/null pairs
+    const filteredValues = [];
+    const filteredTimestamps = [];
+    for (let i = 0; i < rawClose.length; i++) {
+      const v = rawClose[i];
+      if (v !== null && v !== undefined && !isNaN(v)) {
+        filteredValues.push(v);
+        filteredTimestamps.push(timestamps[i]);
+      }
+    }
+
+    return {
+      values: filteredValues,
+      timestamps: filteredTimestamps,
+      sampleRate: 1,
+      label: `${symbol} Close`,
+      units: currency || 'USD',
+      source: 'Yahoo Finance',
+      symbol: symbol,
+      lastPrice: meta.regularMarketPrice,
+      lastUpdate: Date.now()
+    };
+  }
+
+  async function fetchYahooFinance(symbol, interval, range) {
+    const url = `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`;
+
+    // Try Yahoo directly first (they support CORS since 2022)
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const json = await res.json();
+        return parseYahooFinanceResponse(json);
+      }
+    } catch (e) {
+      // Direct fetch failed, fall through to proxy
+    }
+
+    // Try CORS proxy as fallback
+    try {
+      const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+      const res = await fetch(proxy);
+      if (res.ok) {
+        const json = await res.json();
+        return parseYahooFinanceResponse(json);
+      }
+    } catch (e) {
+      // Proxy also failed
+    }
+
+    throw new Error('Yahoo Finance unavailable — check symbol or try simulation mode');
+  }
+
   // ─── Public API ───────────────────────────────────────────────────────────
 
   return {
@@ -645,7 +711,9 @@ const DataIO = (() => {
     generators,
     getColumnNames,
     getNumericColumns,
-    columnToArray
+    columnToArray,
+    fetchYahooFinance,
+    parseYahooFinanceResponse
   };
 
 })();

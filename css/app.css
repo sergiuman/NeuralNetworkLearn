@@ -1726,3 +1726,122 @@ html, body {
   border-left: none !important;
   overflow: hidden !important;
 }
+
+/* ─── Live Feed UI ───────────────────────────────────────────────────────── */
+
+#btn-live {
+  background: #1B5E20;
+  color: #A5D6A7;
+  border-color: #2E7D32;
+  gap: 6px;
+}
+
+#btn-live:hover {
+  background: #2E7D32;
+  color: #fff;
+}
+
+#btn-stop-live {
+  background: #B71C1C;
+  color: #FFCDD2;
+  border-color: #C62828;
+  gap: 6px;
+}
+
+#btn-stop-live:hover {
+  background: #C62828;
+  color: #fff;
+}
+
+.live-status-badge {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text-secondary, #9e9e9e);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color, #2a2d3e);
+  background: var(--bg-panel, #1e2130);
+  white-space: nowrap;
+  min-width: 80px;
+  transition: all 0.3s;
+}
+
+.live-status-badge.active {
+  color: #A5D6A7;
+  border-color: #2E7D32;
+  background: rgba(46, 125, 50, 0.15);
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ─── Live template button ───────────────────────────────────────────────── */
+
+.btn-live-template {
+  background: linear-gradient(135deg, #1B5E20, #FF6F00);
+  color: #fff !important;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.btn-live-template:hover {
+  background: linear-gradient(135deg, #2E7D32, #F57C00);
+  opacity: 0.95;
+}
+
+/* ─── Live block pulse (blocks with active live feed) ───────────────────── */
+
+.pipeline-block[data-type="liveDataSource"] .block-header {
+  position: relative;
+  overflow: hidden;
+}
+
+.pipeline-block[data-type="liveDataSource"].feed-active .block-header::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 100%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent);
+  animation: live-sweep 2s linear infinite;
+}
+
+@keyframes live-sweep {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* ─── NN Topology badge on block ─────────────────────────────────────────── */
+
+.block-topology-badge {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.7);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+}
+
+/* ─── Chart enhancements: source label ──────────────────────────────────── */
+
+.chart-source-label {
+  font-size: 10px;
+  color: var(--text-secondary, #9e9e9e);
+  text-align: right;
+  margin-top: 2px;
+  font-style: italic;
+}
+
+/* ─── Stock prediction output: color-code predictions ───────────────────── */
+
+.prediction-buy   { color: #66BB6A; font-weight: 600; }
+.prediction-hold  { color: #FFB74D; font-weight: 600; }
+.prediction-sell  { color: #EF5350; font-weight: 600; }
+.prediction-bullish  { color: #66BB6A; font-weight: 600; }
+.prediction-neutral  { color: #FFB74D; font-weight: 600; }
+.prediction-bearish  { color: #EF5350; font-weight: 600; }
