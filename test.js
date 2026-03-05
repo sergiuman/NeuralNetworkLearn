@@ -1665,6 +1665,205 @@ if (XLSX2 && fs2.existsSync('test_data/stock_data.xlsx')) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// TRAIN / INFERENCE MODE TESTS
+// Tests the two-mode pipeline workflow required for the S&P 500 use case:
+//   1. Train on historical data → model persists in config
+//   2. Swap data source → Infer uses saved model, no retraining
+// ══════════════════════════════════════════════════════════════════════════════
+runTests('TrainInferMode', function() {
+  var pass = 0, fail = 0;
+  function assert(cond, msg) {
+    if (cond) { pass++; console.log('  PASS: ' + msg); }
+    else { fail++; console.error('  FAIL: ' + msg); }
+  }
+
+  console.log('=== Train / Inference Mode Tests ===');
+
+  var nnDef  = BlockRegistry.getBlockType('neuralNetwork');
+  var knnDef = BlockRegistry.getBlockType('knnClassifier');
+
+  function makeFeatures(n, dim) {
+    var vecs = [];
+    for (var i = 0; i < n; i++) {
+      var row = [];
+      for (var d = 0; d < dim; d++) row.push(Math.sin(i * 0.3 + d) * 0.5 + 0.5);
+      vecs.push(row);
+    }
+    return { vectors: vecs, labels: [], featureNames: ['f1','f2','f3'] };
+  }
+
+  // T1: NN train mode stores trainedNetwork
+  console.log('  --- T1: NN train mode ---');
+  var nnCfg = {
+    hiddenLayers: [{ neurons: 8, activation: 'relu' }],
+    outputNeurons: 2, outputActivation: 'softmax',
+    learningRate: 0.01, momentum: 0.9, epochs: 20, batchSize: 4,
+    classNames: 'Rise,Fall', trainedNetwork: null
+  };
+  try {
+    var r1 = nnDef.process(nnCfg, { features: makeFeatures(30, 3) });
+    assert(r1.predictions !== undefined, 'T1: NN train returns predictions');
+    assert(r1.predictions.items.length === 30, 'T1: 30 predictions for 30 samples');
+    assert(nnCfg.trainedNetwork !== null, 'T1: trainedNetwork stored in config after train');
+    assert(nnCfg._isTrained === true, 'T1: _isTrained flag set to true');
+    assert(!r1.predictions.error, 'T1: no error in train mode');
+  } catch(e) { assert(false, 'T1 threw: ' + e.message); }
+
+  // T2: NN infer mode reuses saved model, no retraining
+  console.log('  --- T2: NN infer mode uses saved model ---');
+  var savedNetwork = nnCfg.trainedNetwork;
+  try {
+    nnCfg._runMode = 'infer';
+    var r2 = nnDef.process(nnCfg, { features: makeFeatures(15, 3) });
+    assert(r2.predictions !== undefined, 'T2: NN infer returns predictions');
+    assert(r2.predictions.items.length === 15, 'T2: 15 predictions on new data');
+    assert(nnCfg.trainedNetwork === savedNetwork, 'T2: same trainedNetwork — no retrain');
+    assert(!r2.predictions.error, 'T2: no error when model exists');
+    delete nnCfg._runMode;
+  } catch(e) { assert(false, 'T2 threw: ' + e.message); }
+
+  // T3: NN infer with no model returns error
+  console.log('  --- T3: NN infer with no saved model ---');
+  var nnCfgEmpty = {
+    hiddenLayers: [{ neurons: 4, activation: 'relu' }],
+    outputNeurons: 2, outputActivation: 'softmax',
+    learningRate: 0.01, momentum: 0.9, epochs: 10, batchSize: 4,
+    classNames: 'Rise,Fall', trainedNetwork: null, _runMode: 'infer'
+  };
+  try {
+    var r3 = nnDef.process(nnCfgEmpty, { features: makeFeatures(10, 3) });
+    assert(r3.predictions !== undefined, 'T3: returns predictions object');
+    assert(typeof r3.predictions.error === 'string', 'T3: error string present');
+    assert(r3.predictions.items.length === 0, 'T3: items array is empty');
+    assert(nnCfgEmpty._isTrained === false, 'T3: _isTrained is false');
+  } catch(e) { assert(false, 'T3 threw: ' + e.message); }
+
+  // T4: forceRetrain flag causes retrain even with existing model
+  console.log('  --- T4: NN forceRetrain flag ---');
+  var nnCfgRetrain = {
+    hiddenLayers: [{ neurons: 8, activation: 'relu' }],
+    outputNeurons: 2, outputActivation: 'softmax',
+    learningRate: 0.01, momentum: 0.9, epochs: 20, batchSize: 4,
+    classNames: 'Rise,Fall', trainedNetwork: savedNetwork, forceRetrain: true
+  };
+  try {
+    var r4 = nnDef.process(nnCfgRetrain, { features: makeFeatures(20, 3) });
+    assert(r4.predictions.items.length === 20, 'T4: predictions after forceRetrain');
+    assert(nnCfgRetrain.forceRetrain === false, 'T4: forceRetrain reset to false');
+    assert(nnCfgRetrain.trainedNetwork !== null, 'T4: new model stored');
+  } catch(e) { assert(false, 'T4 threw: ' + e.message); }
+
+  // T5: kNN train mode stores _trainData
+  console.log('  --- T5: kNN train mode ---');
+  var knnCfg = { k: 3, numClasses: 2, classNames: 'Rise,Fall' };
+  try {
+    var r5 = knnDef.process(knnCfg, { features: makeFeatures(40, 3) });
+    assert(r5.predictions !== undefined, 'T5: kNN train returns predictions');
+    assert(r5.predictions.items.length === 40, 'T5: 40 predictions');
+    assert(knnCfg._trainData !== undefined && knnCfg._trainData !== null, 'T5: _trainData stored in config');
+    assert(Array.isArray(knnCfg._trainData.vectors), 'T5: _trainData.vectors is array');
+    assert(Array.isArray(knnCfg._trainData.labels), 'T5: _trainData.labels is array');
+    assert(knnCfg._isTrained === true, 'T5: _isTrained flag set');
+  } catch(e) { assert(false, 'T5 threw: ' + e.message); }
+
+  // T6: kNN infer mode classifies new data against stored training data
+  console.log('  --- T6: kNN infer mode ---');
+  var storedTrainData = knnCfg._trainData;
+  try {
+    knnCfg._runMode = 'infer';
+    var r6 = knnDef.process(knnCfg, { features: makeFeatures(20, 3) });
+    assert(r6.predictions !== undefined, 'T6: kNN infer returns predictions');
+    assert(r6.predictions.items.length === 20, 'T6: 20 predictions on new data');
+    assert(knnCfg._trainData === storedTrainData, 'T6: _trainData unchanged — no re-labeling');
+    assert(!r6.predictions.error, 'T6: no error when trainData exists');
+    delete knnCfg._runMode;
+  } catch(e) { assert(false, 'T6 threw: ' + e.message); }
+
+  // T7: kNN infer with no _trainData returns error
+  console.log('  --- T7: kNN infer with no training data ---');
+  var knnCfgEmpty = { k: 3, numClasses: 2, classNames: 'Rise,Fall', _runMode: 'infer' };
+  try {
+    var r7 = knnDef.process(knnCfgEmpty, { features: makeFeatures(10, 3) });
+    assert(r7.predictions !== undefined, 'T7: returns predictions object');
+    assert(typeof r7.predictions.error === 'string', 'T7: error string present');
+    assert(knnCfgEmpty._isTrained === false, 'T7: _isTrained is false');
+  } catch(e) { assert(false, 'T7 threw: ' + e.message); }
+
+  // T8: NN defaults to train mode when _runMode absent (backward compat)
+  console.log('  --- T8: NN backward-compat — defaults to train when _runMode absent ---');
+  var nnCfg8 = {
+    hiddenLayers: [{ neurons: 4, activation: 'relu' }],
+    outputNeurons: 2, outputActivation: 'softmax',
+    learningRate: 0.01, momentum: 0.9, epochs: 10, batchSize: 4,
+    classNames: 'A,B', trainedNetwork: null
+  };
+  try {
+    var r8 = nnDef.process(nnCfg8, { features: makeFeatures(20, 3) });
+    assert(r8.predictions.items.length === 20, 'T8: 20 predictions without explicit _runMode');
+    assert(nnCfg8.trainedNetwork !== null, 'T8: model stored without explicit _runMode');
+  } catch(e) { assert(false, 'T8 threw: ' + e.message); }
+
+  // T9: Full S&P 500-style — train on historical CSV, infer on new period CSV
+  console.log('  --- T9: S&P 500 simulation — train on historical, infer on new period ---');
+  try {
+    var dsDef9  = BlockRegistry.getBlockType('dataSource');
+    var winDef9 = BlockRegistry.getBlockType('windowing');
+    var staDef9 = BlockRegistry.getBlockType('statistics');
+
+    function makeStockCSV(startPrice, trend, rows) {
+      var csv = 'Day,Close\n';
+      var p = startPrice;
+      for (var i = 0; i < rows; i++) {
+        p *= (1 + trend + 0.01 * (Math.random() * 2 - 1));
+        csv += (i+1) + ',' + p.toFixed(2) + '\n';
+      }
+      return csv;
+    }
+
+    var historicalCSV = makeStockCSV(100, 0.001, 200);
+    var newPeriodCSV  = makeStockCSV(150, -0.001, 100);
+
+    // TRAIN
+    var hist = dsDef9.process({ source: 'csv', csvData: historicalCSV, csvColumn: 'Close', sampleRate: 1 }, {});
+    assert(hist.signal.values.length === 200, 'T9: 200 historical prices loaded');
+    var histWin  = winDef9.process({ windowSize: 20, overlap: 0.5, windowFunction: 'rectangular', applyWindow: false }, { signal: hist.signal });
+    var histStat = staDef9.process({ includeRMS: true, includeMean: true, includeVariance: true, includeStdDev: true, includePeak: false, includeCrestFactor: false, includeZeroCrossings: false, includeEnergy: false }, { segments: histWin.segments });
+    assert(histStat.features.vectors.length > 0, 'T9: ' + histStat.features.vectors.length + ' feature windows from historical data');
+
+    var spCfg = {
+      hiddenLayers: [{ neurons: 16, activation: 'relu' }],
+      outputNeurons: 3, outputActivation: 'softmax',
+      learningRate: 0.01, momentum: 0.9, epochs: 30, batchSize: 4,
+      classNames: 'Buy,Hold,Sell', trainedNetwork: null
+    };
+    var trainResult = nnDef.process(spCfg, { features: histStat.features });
+    assert(trainResult.predictions.items.length > 0, 'T9: NN trained — ' + trainResult.predictions.items.length + ' predictions');
+    assert(spCfg.trainedNetwork !== null, 'T9: Model saved after training');
+    var savedModel9 = spCfg.trainedNetwork;
+
+    // INFER on new period
+    var newData = dsDef9.process({ source: 'csv', csvData: newPeriodCSV, csvColumn: 'Close', sampleRate: 1 }, {});
+    assert(newData.signal.values.length === 100, 'T9: 100 new-period prices loaded');
+    var newWin  = winDef9.process({ windowSize: 20, overlap: 0.5, windowFunction: 'rectangular', applyWindow: false }, { signal: newData.signal });
+    var newStat = staDef9.process({ includeRMS: true, includeMean: true, includeVariance: true, includeStdDev: true, includePeak: false, includeCrestFactor: false, includeZeroCrossings: false, includeEnergy: false }, { segments: newWin.segments });
+
+    spCfg._runMode = 'infer';
+    var inferResult = nnDef.process(spCfg, { features: newStat.features });
+    assert(!inferResult.predictions.error, 'T9: infer on new data — no error');
+    assert(inferResult.predictions.items.length > 0, 'T9: infer produced ' + inferResult.predictions.items.length + ' Buy/Hold/Sell signals');
+    assert(spCfg.trainedNetwork === savedModel9, 'T9: same model object used — no retraining');
+    var validClasses9 = ['Buy', 'Hold', 'Sell'];
+    var allValid9 = inferResult.predictions.items.every(function(p) { return validClasses9.indexOf(p.className) >= 0; });
+    assert(allValid9, 'T9: all infer predictions are valid (Buy/Hold/Sell)');
+    console.log('  T9 complete: trained on 200-day bull run, inferred ' + inferResult.predictions.items.length + ' signals on new 100-day period');
+    delete spCfg._runMode;
+  } catch(e) { assert(false, 'T9 threw: ' + e.message); }
+
+  console.log('TrainInferMode: ' + pass + ' passed, ' + fail + ' failed\n');
+  return { pass: pass, fail: fail };
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // SUMMARY
 // ══════════════════════════════════════════════════════════════════════════════
 console.log('='.repeat(60));
