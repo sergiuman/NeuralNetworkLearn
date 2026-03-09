@@ -619,12 +619,30 @@ const BlockRegistry = (() => {
             : Array.from({ length: config.outputNeurons }, (_, i) => `Out_${i}`)
         };
 
+        // Compute accuracy and confusion matrix using auto-generated ground-truth labels
+        const groundTruth = autoGenerateTargets(features.vectors.map(v => v.slice(0, inputSize)), config.outputNeurons);
+        const N = predictions.length;
+        const numClasses = config.outputNeurons;
+        const matrix = Array.from({ length: numClasses }, () => new Array(numClasses).fill(0));
+        let correct = 0;
+        for (let i = 0; i < N; i++) {
+          const actual = groundTruth[i].indexOf(Math.max(...groundTruth[i]));
+          const predicted = predictions[i].classIndex;
+          if (actual === predicted) correct++;
+          if (actual >= 0 && actual < numClasses && predicted >= 0 && predicted < numClasses) {
+            matrix[actual][predicted]++;
+          }
+        }
+        const accuracy = N > 0 ? correct / N : 0;
+
         return {
           predictions: {
             items: predictions,
             classNames,
             network: NeuralNetwork.serialize(network),
-            trainingHistory: network.trainingHistory
+            trainingHistory: network.trainingHistory,
+            accuracy,
+            confusionMatrix: matrix
           },
           features: outputFeatures
         };

@@ -1260,7 +1260,8 @@ const PipelineEditor = (() => {
         blocks: [
           { id: 'ls1', type: 'liveDataSource', x: 50, y: 120, config: {
               source: 'yahoo', symbol: '^GSPC', interval: '1d', historyBars: 30,
-              autoInfer: true, pollSeconds: 60
+              autoInfer: true, pollSeconds: 60,
+              stepLabel: 'Step 1: Train first, then go Live'
           }},
           { id: 'ls2', type: 'windowing', x: 290, y: 100, config: {
               windowSize: 10, overlap: 0.5, windowFunction: 'rectangular', applyWindow: false
@@ -1275,10 +1276,11 @@ const PipelineEditor = (() => {
               learningRate: 0.01, momentum: 0.9, epochs: 100, batchSize: 8,
               classNames: 'Bullish,Neutral,Bearish',
               topology: 'recurrent',
-              trainedNetwork: null
+              trainedNetwork: null,
+              stepLabel: 'Step 2: Model trains on history'
           }},
-          { id: 'ls5', type: 'output', x: 50, y: 350, config: { title: 'S&P 500 Live Price', chartType: 'auto' }},
-          { id: 'ls6', type: 'output', x: 1010, y: 100, config: { title: 'Trend Prediction', chartType: 'auto' }}
+          { id: 'ls5', type: 'output', x: 50, y: 350, config: { title: 'S&P 500 Price (30-day history + live)', chartType: 'auto' }},
+          { id: 'ls6', type: 'output', x: 1010, y: 100, config: { title: 'Step 3: Live Trend Predictions (Bullish / Neutral / Bearish)', chartType: 'auto' }}
         ],
         connections: [
           { fromBlock: 'ls1', fromPort: 0, toBlock: 'ls2', toPort: 0 },
@@ -1286,6 +1288,34 @@ const PipelineEditor = (() => {
           { fromBlock: 'ls2', fromPort: 0, toBlock: 'ls3', toPort: 1 },
           { fromBlock: 'ls3', fromPort: 0, toBlock: 'ls4', toPort: 0 },
           { fromBlock: 'ls4', fromPort: 0, toBlock: 'ls6', toPort: 4 }
+        ]
+      },
+      'nn-basics': {
+        blocks: [
+          { id: 'nn1', type: 'dataSource', x: 50, y: 150, config: {
+            source: 'generate', generator: 'sine', sampleRate: 64,
+            generatorConfig: { samples: 128, frequency: 2, sampleRate: 64, amplitude: 1, noise: 0.1 }
+          }},
+          { id: 'nn2', type: 'statistics', x: 290, y: 130, config: {
+            includeRMS: true, includeMean: true, includeVariance: true, includeStdDev: false,
+            includePeak: true, includeCrestFactor: false, includeZeroCrossings: true, includeEnergy: false
+          }},
+          { id: 'nn3', type: 'neuralNetwork', x: 530, y: 130, config: {
+            hiddenLayers: [{ neurons: 4, activation: 'relu' }],
+            outputNeurons: 2, outputActivation: 'softmax',
+            learningRate: 0.05, epochs: 100, batchSize: 4,
+            classNames: 'Pattern A,Pattern B',
+            topology: 'feedforward',
+            trainedNetwork: null
+          }},
+          { id: 'nn4', type: 'output', x: 770, y: 130, config: { title: 'NN Predictions', chartType: 'auto' }},
+          { id: 'nn5', type: 'output', x: 50, y: 380, config: { title: 'Input Signal', chartType: 'auto' }}
+        ],
+        connections: [
+          { fromBlock: 'nn1', fromPort: 0, toBlock: 'nn2', toPort: 1 },
+          { fromBlock: 'nn1', fromPort: 0, toBlock: 'nn5', toPort: 0 },
+          { fromBlock: 'nn2', fromPort: 0, toBlock: 'nn3', toPort: 0 },
+          { fromBlock: 'nn3', fromPort: 0, toBlock: 'nn4', toPort: 4 }
         ]
       },
       'stock-train-infer': {

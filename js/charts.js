@@ -421,7 +421,7 @@ const Charts = (() => {
 
   function visualizeSpectrum(container, spectrum, options) {
     if (!spectrum || !spectrum.values) return;
-    return createChart(container, 'bar', {
+    const canvas = createChart(container, 'bar', {
       datasets: [{ values: spectrum.values, label: spectrum.name || 'Spectrum' }],
       labels: spectrum.frequencies ? spectrum.frequencies.map(f => f.toFixed(1) + 'Hz') : undefined
     }, {
@@ -430,6 +430,61 @@ const Charts = (() => {
       yLabel: spectrum.type === 'power' ? 'Power' : 'Magnitude',
       ...options
     });
+
+    // Add hover tooltip for frequency bins
+    if (canvas && canvas.addEventListener && spectrum.values && spectrum.values.length > 0) {
+      // Create tooltip div (reuse if exists globally)
+      let tooltip = typeof document !== 'undefined' && document.getElementById('_sf_spectrum_tooltip');
+      if (!tooltip && typeof document !== 'undefined') {
+        tooltip = document.createElement('div');
+        tooltip.id = '_sf_spectrum_tooltip';
+        tooltip.style.cssText = 'position:fixed;display:none;background:#222;color:#fff;border:1px solid #555;border-radius:4px;padding:5px 9px;font-size:12px;pointer-events:none;z-index:9999;white-space:nowrap;';
+        document.body.appendChild(tooltip);
+      }
+
+      const padding = { top: 40, right: 20, bottom: 50, left: 60 };
+
+      canvas.addEventListener('mousemove', (e) => {
+        if (!tooltip) return;
+        const rect = canvas.getBoundingClientRect();
+        const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+        const logicalW = canvas.width / dpr;
+        const logicalH = canvas.height / dpr;
+        const scaleX = logicalW / rect.width;
+        const scaleY = logicalH / rect.height;
+        const mx = (e.clientX - rect.left) * scaleX;
+        const my = (e.clientY - rect.top) * scaleY;
+
+        const plotX = padding.left;
+        const plotW = logicalW - padding.left - padding.right;
+        const N = spectrum.values.length;
+
+        if (mx >= plotX && mx <= plotX + plotW) {
+          const barGroupWidth = plotW / N;
+          const barIdx = Math.floor((mx - plotX) / barGroupWidth);
+          if (barIdx >= 0 && barIdx < N) {
+            const freqLabel = spectrum.frequencies
+              ? spectrum.frequencies[barIdx].toFixed(1) + ' Hz'
+              : barIdx + ' bin';
+            const magLabel = typeof spectrum.values[barIdx] === 'number'
+              ? spectrum.values[barIdx].toPrecision(4)
+              : '—';
+            tooltip.innerHTML = `<b>Frequency:</b> ${freqLabel}<br><b>Magnitude:</b> ${magLabel}`;
+            tooltip.style.display = 'block';
+            tooltip.style.left = (e.clientX + 12) + 'px';
+            tooltip.style.top = (e.clientY - 10) + 'px';
+            return;
+          }
+        }
+        tooltip.style.display = 'none';
+      });
+
+      canvas.addEventListener('mouseout', () => {
+        if (tooltip) tooltip.style.display = 'none';
+      });
+    }
+
+    return canvas;
   }
 
   function visualizeFeatures(container, features, options) {
@@ -461,7 +516,10 @@ const Charts = (() => {
     const labels = Object.keys(classCounts);
     const values = Object.values(classCounts);
 
-    return createChart(container, 'bar', {
+    const wrapper = typeof container === 'string' ? document.getElementById(container) : container;
+
+    // Render bar chart
+    const barChart = createChart(container, 'bar', {
       datasets: [{ values, label: 'Predictions' }],
       labels
     }, {
@@ -470,6 +528,115 @@ const Charts = (() => {
       yLabel: 'Count',
       ...options
     });
+
+    // Accuracy badge
+    if (wrapper && typeof predictions.accuracy === 'number') {
+      const pct = (predictions.accuracy * 100).toFixed(1);
+      const color = predictions.accuracy > 0.7 ? '#4CAF50' : predictions.accuracy > 0.5 ? '#FF9800' : '#F44336';
+      const badge = document.createElement('div');
+      badge.style.cssText = `margin:4px 0 2px 0; padding:3px 10px; border-radius:4px; display:inline-block; font-size:13px; font-weight:bold; color:#fff; background:${color};`;
+      badge.textContent = `Accuracy: ${pct}%`;
+      wrapper.appendChild(badge);
+    }
+
+    // Confusion matrix
+    if (wrapper && predictions.confusionMatrix && predictions.confusionMatrix.length > 0) {
+      const cmCanvas = document.createElement('canvas');
+      const cmClassNames = predictions.classNames && predictions.classNames.length > 0
+        ? predictions.classNames
+        : predictions.confusionMatrix.map((_, i) => `Class ${i}`);
+      const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+      const cellSize = 48;
+      const labelPad = 64;
+      const cmW = labelPad + cellSize * predictions.confusionMatrix[0].length;
+      const cmH = labelPad + cellSize * predictions.confusionMatrix.length + 20;
+      cmCanvas.width = cmW * dpr;
+      cmCanvas.height = cmH * dpr;
+      cmCanvas.style.width = cmW + 'px';
+      cmCanvas.style.height = cmH + 'px';
+      cmCanvas.style.display = 'block';
+      cmCanvas.style.marginTop = '6px';
+      const ctx = cmCanvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+
+      // Background
+      ctx.fillStyle = '#1e1e2e';
+      ctx.fillRect(0, 0, cmW, cmH);
+
+      const n = predictions.confusionMatrix.length;
+      const maxVal = Math.max(1, ...predictions.confusionMatrix.flat());
+
+      // Title
+      ctx.fillStyle = '#a0a0a0';
+      ctx.font = 'bold 11px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Confusion Matrix', cmW / 2, 13);
+
+      // Column headers (Predicted)
+      ctx.font = '10px Inter, system-ui, sans-serif';
+      ctx.fillStyle = '#888';
+      for (let j = 0; j < n; j++) {
+        const x = labelPad + j * cellSize + cellSize / 2;
+        const name = cmClassNames[j] || `C${j}`;
+        const shortName = name.length > 6 ? name.substring(0, 6) : name;
+        ctx.textAlign = 'center';
+        ctx.fillText(shortName, x, 26);
+      }
+
+      // Row headers (Actual) and cells
+      for (let i = 0; i < n; i++) {
+        const y = labelPad + i * cellSize;
+        // Row label
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#888';
+        ctx.font = '10px Inter, system-ui, sans-serif';
+        const rowName = cmClassNames[i] || `C${i}`;
+        const shortRow = rowName.length > 7 ? rowName.substring(0, 7) : rowName;
+        ctx.fillText(shortRow, labelPad - 4, y + cellSize / 2 + 4);
+
+        for (let j = 0; j < n; j++) {
+          const val = predictions.confusionMatrix[i][j];
+          const x = labelPad + j * cellSize;
+          const intensity = val / maxVal;
+          // Diagonal = green, off-diagonal = red
+          let cellColor;
+          if (i === j) {
+            const g = Math.round(60 + intensity * 140);
+            cellColor = `rgb(30,${g},30)`;
+          } else {
+            const r = Math.round(60 + intensity * 140);
+            cellColor = `rgb(${r},30,30)`;
+          }
+          ctx.fillStyle = cellColor;
+          ctx.fillRect(x + 1, y + 1, cellSize - 2, cellSize - 2);
+
+          // Cell text
+          ctx.fillStyle = '#e0e0e0';
+          ctx.font = 'bold 13px Inter, system-ui, monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(String(val), x + cellSize / 2, y + cellSize / 2 + 5);
+        }
+      }
+
+      // Axis labels
+      ctx.save();
+      ctx.fillStyle = '#666';
+      ctx.font = '10px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.translate(8, labelPad + (n * cellSize) / 2);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText('Actual', 0, 0);
+      ctx.restore();
+
+      ctx.fillStyle = '#666';
+      ctx.font = '10px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Predicted', labelPad + (n * cellSize) / 2, cmH - 4);
+
+      wrapper.appendChild(cmCanvas);
+    }
+
+    return barChart;
   }
 
   function visualizeClassification(container, classification, options) {
@@ -510,15 +677,54 @@ const Charts = (() => {
 
   function visualizeTrainingHistory(container, history, options) {
     if (!history || history.length === 0) return;
-    return createChart(container, 'line', {
+    const canvas = createChart(container, 'line', {
       datasets: [{ values: history.map(h => h.loss), label: 'Loss', fill: true }],
       labels: history.map(h => `${h.epoch}`)
     }, {
       title: 'Training Loss',
-      xLabel: 'Epoch',
+      xLabel: 'Training Epoch',
       yLabel: 'Loss',
       ...options
     });
+
+    // Add loss curve annotations
+    if (canvas && canvas.getContext) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.clientWidth || canvas.width;
+      const h = canvas.clientHeight || canvas.height;
+      const finalLoss = history[history.length - 1] && history[history.length - 1].loss;
+      const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+      const logicalW = canvas.width / dpr;
+      const logicalH = canvas.height / dpr;
+
+      // "↓ lower = better" annotation near end of curve
+      ctx.save();
+      ctx.fillStyle = '#a0a0a0';
+      ctx.font = '10px Inter, system-ui, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.fillText('↓ lower = better', logicalW - 24, logicalH - 54);
+
+      // Final loss quality annotation
+      if (typeof finalLoss === 'number') {
+        let annText, annColor;
+        if (finalLoss < 0.3) {
+          annText = '✓ Well trained';
+          annColor = '#4CAF50';
+        } else if (finalLoss > 0.7) {
+          annText = '⚠ Try more epochs';
+          annColor = '#FF9800';
+        }
+        if (annText) {
+          ctx.fillStyle = annColor;
+          ctx.font = 'bold 11px Inter, system-ui, sans-serif';
+          ctx.textAlign = 'right';
+          ctx.fillText(annText, logicalW - 24, logicalH - 38);
+        }
+      }
+      ctx.restore();
+    }
+
+    return canvas;
   }
 
   // ─── Spectrogram ──────────────────────────────────────────────────────────

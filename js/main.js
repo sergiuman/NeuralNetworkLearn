@@ -196,6 +196,10 @@ const App = (() => {
       loadTemplate('spectrogram-demo');
     });
 
+    document.getElementById('btn-template-nn-basics')?.addEventListener('click', () => {
+      loadTemplate('nn-basics');
+    });
+
     document.getElementById('btn-template-live-sp500')?.addEventListener('click', () => {
       loadTemplate('live-sp500');
     });
